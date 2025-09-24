@@ -80,5 +80,48 @@ src/
 ### Notes
 Cart data is client-side only (localStorage). Replace sample data with live API when ready.
 
+## Backend Integration (Extended)
+
+The frontend now integrates with a Spring Boot backend providing real products, categories, orders and admin utilities.
+
+### Product Search Endpoint
+`GET /api/products/search`
+
+Query params (all optional):
+- `q` – free text (name/description partial, case-insensitive)
+- `categoryId` – numeric category id
+- `minPrice`, `maxPrice` – inclusive bounds
+- `inStock` – set to `true` to restrict to products with stock > 0
+
+Example:
+```
+/api/products/search?q=milk&minPrice=100&maxPrice=500&inStock=true
+```
+
+### Stock Handling
+- Each product has an integer `stock`.
+- Orders atomically decrement stock; insufficient stock rejects the order.
+- UI shows badges (Out / N left) and disables add-to-cart at zero.
+- Cart quantities clamp to available stock and warn via toast if exceeded.
+
+### Admin (Demo, Unsecured)
+Routes under `/api/admin` allow product CRUD, order listing & status updates, category CRUD, and dashboard stats. In production these must be secured (JWT/session, role checks) and possibly separated into public vs admin category endpoints.
+
+### Image Upload
+`POST /api/products/{id}/image` multipart field `file` – updates product `imageUrl` served from `/images/*`.
+
+### Categories
+Fetched from `GET /api/admin/categories` (public for demo). Each item: `{ id, name }`.
+
+### New Frontend Admin Screens
+- `/admin/products` – search, create/edit (with stock & optional image), delete.
+- `/admin/orders` – list orders and update status via dropdown.
+
+### Debounced Filtering UI
+The home page now uses debounced queries for text (500ms) and range/stock/category filters, calling the backend search endpoint instead of filtering client-side.
+
+---
+> NOTE: Ensure environment variable `VITE_API_BASE_URL` points to the backend origin (e.g. `http://localhost:8080/api`).
+
 ---
 Feel free to adapt and extend. Karibu! 🇰🇪

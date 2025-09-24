@@ -1,4 +1,5 @@
 import { createContext, useContext, useEffect, useState } from 'react';
+import { useToast } from './ToastContext.jsx';
 
 const CartContext = createContext();
 
@@ -16,14 +17,31 @@ export function CartProvider({ children }) {
     localStorage.setItem('cart', JSON.stringify(items));
   }, [items]);
 
+  const { push } = useToast();
+
   function addItem(product, quantity = 1) {
+    let result = { added: false };
     setItems(prev => {
       const existing = prev.find(i => i.id === product.id);
-      if (existing) {
-        return prev.map(i => i.id === product.id ? { ...i, qty: i.qty + quantity } : i);
+      const max = product.stock != null ? product.stock : Infinity;
+      if (max === 0) {
+        result = { added: false, reason: 'out-of-stock' };
+        return prev;
       }
-      return [...prev, { ...product, qty: quantity }];
+      if (existing) {
+        const newQty = Math.min(existing.qty + quantity, max);
+        if (newQty === existing.qty) {
+          result = { added: false, reason: 'max-stock' };
+          return prev;
+        }
+        result = { added: true };
+        return prev.map(i => i.id === product.id ? { ...i, qty: newQty, stock: max } : i);
+      }
+      const initialQty = Math.min(quantity, max);
+      result = { added: true };
+      return [...prev, { ...product, qty: initialQty, stock: max }];
     });
+    return result;
   }
 
   function removeItem(id) {
@@ -31,8 +49,15 @@ export function CartProvider({ children }) {
   }
 
   function updateQty(id, qty) {
-    if (qty <= 0) return removeItem(id);
-    setItems(prev => prev.map(i => i.id === id ? { ...i, qty } : i));
+    setItems(prev => {
+      const item = prev.find(i => i.id === id);
+      if (!item) return prev;
+      const max = item.stock != null ? item.stock : Infinity;
+      if (qty <= 0) return prev.filter(i => i.id !== id);
+      const clamped = Math.min(qty, max);
+      if (clamped < qty) push(`Only ${max} available`);
+      return prev.map(i => i.id === id ? { ...i, qty: clamped } : i);
+    });
   }
 
   function clearCart() { setItems([]); }

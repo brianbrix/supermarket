@@ -2,6 +2,7 @@ import { formatKES } from '../utils/currency.js';
 import { useCart } from '../context/CartContext.jsx';
 import { useToast } from '../context/ToastContext.jsx';
 import { useLocation, useNavigate, Link } from 'react-router-dom';
+import ImageWithFallback from './ImageWithFallback.jsx';
 
 export default function ProductCard({ product }) {
   const { addItem } = useCart();
@@ -10,25 +11,37 @@ export default function ProductCard({ product }) {
   const navigate = useNavigate();
 
   function handleAdd() {
-    addItem(product);
-    push(`${product.name} added to cart`);
+    if (product.stock === 0) {
+      push(`${product.name} is out of stock`);
+      return;
+    }
+    const added = addItem(product);
+    if (added.added) {
+      push(`${product.name} added to cart`);
+    } else if (added.reason === 'max-stock') {
+      push(`Maximum stock reached for ${product.name}`);
+    }
     const params = new URLSearchParams(location.search);
     if (params.get('returnTo') === 'checkout') {
       navigate('/checkout');
     }
   }
   return (
-    <div className="card h-100">
+    <div className="card h-100 position-relative">
+      {product.stock === 0 && <span className="badge text-bg-danger position-absolute top-0 end-0 m-2">Out</span>}
+      {product.stock > 0 && product.stock <= 3 && <span className="badge text-bg-warning position-absolute top-0 end-0 m-2">{product.stock} left</span>}
       <Link to={`/product/${product.id}`} className="text-decoration-none text-reset">
         <div className="card-body pb-2">
-          <div className="text-center mb-2" style={{fontSize:'2.5rem'}} aria-hidden>{product.image ? <img src={product.image} alt={product.name} style={{maxWidth:'100%', height:'auto'}}/> : <span role="img" aria-label="basket">🧺</span>}</div>
+          <div className="text-center mb-2" style={{fontSize:'2.5rem'}}>
+            <ImageWithFallback src={product.image} alt={product.name} />
+          </div>
           <h3 className="h6 mb-1">{product.name}</h3>
           <p className="text-muted small mb-2">{product.description}</p>
         </div>
       </Link>
       <div className="px-3 pb-3 mt-auto">
         <p className="fw-semibold mb-2">{formatKES(product.price)} <span className="text-secondary small">/{product.unit}</span></p>
-        <button onClick={handleAdd} className="btn btn-success w-100 btn-sm">Add</button>
+        <button onClick={handleAdd} className="btn btn-success w-100 btn-sm" disabled={product.stock === 0}>Add</button>
       </div>
     </div>
   );

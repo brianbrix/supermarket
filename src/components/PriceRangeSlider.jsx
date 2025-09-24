@@ -1,49 +1,77 @@
-import { useEffect, useRef, useState } from 'react';
+import { useEffect, useState } from 'react';
 
-// A simple dual range slider built from two range inputs layered together.
-// Props: min, max, valueMin, valueMax, onChange({min, max})
-export default function PriceRangeSlider({ min, max, valueMin, valueMax, onChange, step=1 }) {
+// Replaced slider UI with two numeric inputs while keeping the same external API.
+// Props: min, max, valueMin, valueMax, onChange({min, max}), step
+export default function PriceRangeSlider({ min, max, valueMin, valueMax, onChange, step = 1 }) {
   const [internalMin, setInternalMin] = useState(valueMin);
   const [internalMax, setInternalMax] = useState(valueMax);
-  const minRef = useRef(null);
-  const maxRef = useRef(null);
 
-  useEffect(()=>{ setInternalMin(valueMin); }, [valueMin]);
-  useEffect(()=>{ setInternalMax(valueMax); }, [valueMax]);
+  // Sync internal state with controlled values from parent
+  useEffect(() => { setInternalMin(valueMin); }, [valueMin]);
+  useEffect(() => { setInternalMax(valueMax); }, [valueMax]);
 
-  function clampValues(nextMin, nextMax){
+  function normalize(nextMin, nextMax) {
+    if (isNaN(nextMin)) nextMin = min;
+    if (isNaN(nextMax)) nextMax = max;
+    if (nextMin < min) nextMin = min;
+    if (nextMax > max) nextMax = max;
     if (nextMin > nextMax) {
-      // swap to maintain invariant
-      return [nextMax, nextMax];
+      // Collapse to the entered value to avoid flip-flop UX
+      nextMax = nextMin;
     }
     return [nextMin, nextMax];
   }
 
-  function handleMin(e){
-    const v = Number(e.target.value);
-    const [nm, nx] = clampValues(v, internalMax);
+  function commit(nextMin, nextMax) {
+    const [nm, nx] = normalize(nextMin, nextMax);
     setInternalMin(nm);
-    onChange({ min: nm, max: nx });
-  }
-  function handleMax(e){
-    const v = Number(e.target.value);
-    const [nm, nx] = clampValues(internalMin, v);
     setInternalMax(nx);
     onChange({ min: nm, max: nx });
   }
 
-  const percentMin = ((internalMin - min) / (max - min)) * 100;
-  const percentMax = ((internalMax - min) / (max - min)) * 100;
+  function handleMinChange(e) {
+    const v = Number(e.target.value);
+    commit(v, internalMax);
+  }
+
+  function handleMaxChange(e) {
+    const v = Number(e.target.value);
+    commit(internalMin, v);
+  }
 
   return (
-    <div className="price-range-slider">
-      <div className="position-relative" style={{height:'38px'}}>
-        <div className="range-track bg-body-secondary position-absolute top-50 start-0 w-100 translate-middle-y rounded-pill" style={{height:'6px'}}></div>
-        <div className="range-active bg-success position-absolute top-50 translate-middle-y" style={{height:'6px', left:`${percentMin}%`, width:`${percentMax - percentMin}%`, borderRadius:'6px'}}></div>
-        <input ref={minRef} type="range" min={min} max={max} step={step} value={internalMin} onChange={handleMin} aria-label="Minimum price" className="form-range position-absolute top-0 start-0 w-100" style={{pointerEvents:'auto'}} />
-        <input ref={maxRef} type="range" min={min} max={max} step={step} value={internalMax} onChange={handleMax} aria-label="Maximum price" className="form-range position-absolute top-0 start-0 w-100" style={{pointerEvents:'auto'}} />
+    <div className="price-range-inputs">
+      <div className="row g-2 align-items-end">
+        <div className="col-6">
+          <label className="form-label small mb-1" htmlFor="priceMin">Min</label>
+          <input
+            id="priceMin"
+            type="number"
+            className="form-control form-control-sm"
+            min={min}
+            max={internalMax}
+            step={step}
+            value={internalMin}
+            onChange={handleMinChange}
+            aria-label="Minimum price"
+          />
+        </div>
+        <div className="col-6">
+          <label className="form-label small mb-1" htmlFor="priceMax">Max</label>
+            <input
+              id="priceMax"
+              type="number"
+              className="form-control form-control-sm"
+              min={internalMin}
+              max={max}
+              step={step}
+              value={internalMax}
+              onChange={handleMaxChange}
+              aria-label="Maximum price"
+            />
+        </div>
       </div>
-      <div className="d-flex justify-content-between small mt-1">
+      <div className="d-flex justify-content-between mt-1 small text-muted">
         <span>{internalMin}</span>
         <span>{internalMax}</span>
       </div>

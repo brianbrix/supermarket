@@ -1,14 +1,55 @@
 import { useEffect, useState, useRef } from 'react';
+import { useAuth } from '../context/AuthContext.jsx';
+import { api } from '../services/api.js';
 import { formatKES } from '../utils/currency.js';
 
 export default function Orders(){
   const [orders, setOrders] = useState([]);
+  const { isAuthenticated } = useAuth();
   useEffect(()=>{
-    try {
-      const raw = localStorage.getItem('orders');
-      setOrders(raw ? JSON.parse(raw) : []);
-    } catch { setOrders([]); }
-  }, []);
+    let active = true;
+    const mapBackend = (list)=> list.map(o => ({
+      orderRef: o.id || o.orderRef || String(o.id),
+      createdAt: o.createdAt || Date.now(),
+      method: 'mpesa',
+      paymentRef: o.paymentRef || '',
+      snapshot: {
+        items: (o.items || []).map(i => ({ id: i.productId || i.product?.id, name: i.productName || i.product?.name || 'Item', price: i.unitPriceGross || i.unitPrice || i.price || 0, qty: i.quantity || i.qty || 1 })),
+        subtotal: o.totalNet || o.subtotal || o.total || 0,
+        vat: o.vatAmount || o.vat || 0,
+        total: o.totalGross || o.total || 0
+      },
+      customer: { name: o.customerName || 'Customer', phone: o.customerPhone || '', delivery: 'pickup', address: '' }
+    }));
+
+    const loadGuest = () => {
+      try {
+        const raw = localStorage.getItem('guestOrders');
+        const parsed = raw ? JSON.parse(raw) : [];
+        if(active) setOrders(parsed);
+      } catch { if(active) setOrders([]); }
+    };
+
+    const loadAuth = async () => {
+      try {
+        const pageResp = await api.user.orders(); // expecting PageResponse or array
+        if(!active) return;
+        const list = Array.isArray(pageResp) ? pageResp : (pageResp.content || []);
+        setOrders(mapBackend(list));
+      } catch (e) {
+        // fallback to any cached guest orders (rare case after login transition)
+        loadGuest();
+      }
+    };
+
+    if (isAuthenticated) loadAuth(); else loadGuest();
+
+    const storageHandler = (e) => {
+      if (e.key === 'guestOrders' && !isAuthenticated) loadGuest();
+    };
+    window.addEventListener('storage', storageHandler);
+    return ()=>{ active=false; window.removeEventListener('storage', storageHandler); };
+  }, [isAuthenticated]);
 
   const [selected, setSelected] = useState(null);
   const closeBtnRef = useRef(null);
@@ -16,7 +57,7 @@ export default function Orders(){
   function close(){ setSelected(null); }
   const totalItems = (o)=> o.snapshot.items.reduce((s,i)=>s+i.qty,0);
 
-  if (!orders.length) return <section className="container py-3"><h1 className="h5 mb-3">Order History</h1><p className="text-muted">No previous orders yet.</p></section>;
+  if (!orders.length) return <section className="container py-3"><h1 className="h5 mb-3">Order History</h1><p className="text-muted">No previous orders yet.{!isAuthenticated && ' (Guest orders are stored locally during this session)'}</p></section>;
   return (
     <section className="container py-3">
       <h1 className="h5 mb-3">Order History</h1>

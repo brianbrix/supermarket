@@ -12,6 +12,7 @@ import pdfFonts from 'pdfmake/build/vfs_fonts';
 pdfMake.vfs = (pdfFonts?.pdfMake?.vfs) || pdfFonts.vfs || pdfMake.vfs;
 import ProgressSteps from '../components/ProgressSteps.jsx';
 import { generateOrderRef, initiatePayment, sendEmailMock } from '../services/orderService.js';
+import { api } from '../services/api.js';
 import { BRAND_NAME, BRAND_RECEIPT_TITLE, BRAND_COPY_FOOTER } from '../config/brand.js';
 
 export default function Checkout() {
@@ -117,6 +118,24 @@ export default function Checkout() {
       setStep(3);
       setSubmitted(true);
       persist({ submitted: true, step: 3, paymentRef: res.paymentRef, orderSnapshot: snapshot });
+      // Persist order to backend
+      try {
+        await api.orders.create({
+          customerName: form.name,
+          customerPhone: form.phone,
+          items: items.map(i => ({ productId: i.id, quantity: i.qty }))
+        });
+        // Optimistic stock refresh: trigger a background fetch of products to update stock in localStorage cache
+        try {
+          const latest = await api.products.list();
+          // Store minimal cache for quick UI refresh (could integrate with a global store later)
+          localStorage.setItem('products_cache', JSON.stringify({ ts: Date.now(), items: latest }));
+        } catch (e) {
+          console.warn('Post-order stock refresh failed:', e);
+        }
+      } catch (err) {
+        console.warn('Backend order create failed (continuing with local):', err);
+      }
       clearCart();
       push('Payment successful');
       // store order history

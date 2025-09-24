@@ -82,3 +82,13 @@ Cart data is client-side only (localStorage). Replace sample data with live API 
 
 ---
 Feel free to adapt and extend. Karibu! 🇰🇪
+
+### Environment Variables
+
+Create a `.env` (or `.env.local`) with:
+
+```
+VITE_API_BASE_URL=http://localhost:8081/api
+```
+
+If your backend also serves uploaded images under a path like `/images`, the frontend will automatically turn any relative `imageUrl` (e.g. `/images/123.png`) from API responses into an absolute URL using the same origin as `VITE_API_BASE_URL`. This prevents 404s caused by the browser trying to load images from the Vite dev server origin instead of the backend.
