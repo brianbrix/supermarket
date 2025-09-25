@@ -1,0 +1,23 @@
+# Build output
+/target/
+
+# Logs
+*.log
+
+# IDE / Editor
+.idea/
+.vscode/
+*.iml
+
+# OS / misc
+.DS_Store
+
+# Local uploads (not for repo)
+uploads/
+uploads-test/
+
+# Maven wrapper (if added later ignore binary permissions issues)
+.mvn/wrapper/maven-wrapper.jar
+
+# Node artifacts (if any future additions)
+node_modules/
