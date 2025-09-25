@@ -11,7 +11,8 @@ class ProductAdminController extends Controller
 {
     public function index(Request $request)
     {
-        $query = Product::query()->with('category');
+    // Eager load images so admin UI can render thumbnails / reorder without extra round-trips.
+    $query = Product::query()->with(['category','images']);
         if ($search = $request->query('q')) {
             $query->where(function($q) use ($search){
                 $q->where('name','like',"%$search%")->orWhere('description','like',"%$search%");
@@ -25,8 +26,31 @@ class ProductAdminController extends Controller
         $size = (int)$request->query('size',20);
         $page = (int)$request->query('page',0);
         $paginator = $query->paginate($size,['*'],'page',$page+1);
+        // Transform each product to include images array with id/url/position (public API uses a Resource, admin keeps inline)
+        $items = array_map(function($p){
+            $images = $p->images ? $p->images->map(function($img){
+                return [
+                    'id' => $img->id,
+                    'url' => $img->url,
+                    'position' => $img->position,
+                ];
+            })->values()->all() : [];
+            return [
+                'id' => $p->id,
+                'name' => $p->name,
+                'description' => $p->description,
+                'price' => $p->price,
+                'stock' => $p->stock,
+                'unit' => $p->unit,
+                'categoryId' => $p->category_id,
+                'categoryName' => optional($p->category)->name,
+                'imageUrl' => $p->image_url,
+                'images' => $images,
+            ];
+        }, $paginator->items());
+
         return response()->json([
-            'content' => $paginator->items(),
+            'content' => $items,
             'page' => $paginator->currentPage()-1,
             'size' => $paginator->perPage(),
             'totalPages' => $paginator->lastPage(),

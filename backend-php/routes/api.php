@@ -10,29 +10,75 @@ use App\Http\Controllers\Admin\AnalyticsAdminController;
 use App\Http\Controllers\Admin\ProductAdminController;
 use App\Http\Controllers\Admin\PaymentOptionAdminController;
 use App\Http\Controllers\API\PaymentController;
+use App\Http\Controllers\API\OrderController;
+use App\Http\Controllers\API\PaymentOptionPublicController;
+use App\Http\Controllers\Admin\AnalyticsExtraController;
 use App\Http\Controllers\Auth\AuthController;
 
 Route::get('/products', [ProductController::class, 'index']);
 Route::get('/products/search', [ProductController::class, 'search']);
+Route::get('/products/{product}', [ProductController::class, 'show'])->whereNumber('product');
+Route::get('/products/category/{category}', [ProductController::class, 'byCategory']);
 Route::get('/categories', [CategoryController::class, 'index']);
+// Orders (public/user scope – authenticated user association optional)
+Route::get('/orders', [OrderController::class, 'index']);
+Route::get('/orders/{order}', [OrderController::class, 'show']);
+Route::post('/orders', [OrderController::class, 'store']);
+Route::get('/user/orders', [OrderController::class, 'index']); // alias expected by frontend
 // Payment public/order scoped endpoints
 Route::post('/payments', [PaymentController::class, 'create']);
 Route::post('/payments/mobile-money/initiate', [PaymentController::class, 'initiateMobileMoney']);
 Route::post('/payments/manual/initiate', [PaymentController::class, 'initiateManual']);
 Route::post('/payments/manual/reconcile', [PaymentController::class, 'reconcileManual']);
 Route::get('/payments/order/{orderId}', [PaymentController::class, 'getByOrder']);
+Route::get('/payments/options', [PaymentOptionPublicController::class, 'index']);
 // Callback webhooks (no auth)
 Route::post('/payments/mpesa/callback', [PaymentController::class, 'mpesaCallback']);
 Route::post('/payments/airtel/callback', [PaymentController::class, 'airtelCallback']);
 
 // Auth (public)
 Route::post('/auth/register', [AuthController::class, 'register']);
-Route::post('/auth/login', [AuthController::class, 'login']);
+Route::post('/auth/login', [AuthController::class, 'login'])->name('login');
+Route::get('/user/me', [AuthController::class, 'me']); // alias for frontend expectation
 
 // Protected routes (apply sanctum middleware after installing Sanctum)
 Route::middleware('auth:sanctum')->group(function () {
     Route::get('/auth/me', [AuthController::class, 'me']);
     Route::post('/auth/logout', [AuthController::class, 'logout']);
+    // Product image management (non-admin alias paths for existing frontend calls)
+    Route::get('/products/{product}/images', [\App\Http\Controllers\Admin\ProductImageController::class, 'index']);
+    Route::post('/products/{product}/image', [\App\Http\Controllers\Admin\ProductImageController::class, 'store']);
+    Route::post('/products/{product}/images', [\App\Http\Controllers\Admin\ProductImageController::class, 'storeMany']);
+    Route::delete('/products/{product}/images/{image}', [\App\Http\Controllers\Admin\ProductImageController::class, 'destroy']);
+
+    // Temporary diagnostic endpoint – REMOVE in production.
+    Route::get('/debug/storage', function() {
+        $publicStorageLink = public_path('storage');
+        $isLink = is_link($publicStorageLink);
+        $linkTarget = $isLink ? readlink($publicStorageLink) : null;
+        $latest = \App\Models\ProductImage::latest()->first();
+        $relative = null; $diskExists = null; $publicExists = null;
+        if ($latest) {
+            $relative = ltrim(str_replace('/storage','',$latest->url), '/');
+            $diskExists = \Illuminate\Support\Facades\Storage::disk('public')->exists($relative);
+            $publicExists = file_exists(public_path('storage/'.$relative));
+        }
+        return response()->json([
+            'symlink' => [
+                'path' => $publicStorageLink,
+                'exists' => file_exists($publicStorageLink),
+                'isLink' => $isLink,
+                'target' => $linkTarget,
+            ],
+            'latestImageRecord' => $latest ? $latest->only(['id','product_id','url']) : null,
+            'latestImagePath' => [
+                'relative' => $relative,
+                'diskExists' => $diskExists,
+                'publicExists' => $publicExists,
+            ],
+            'app_url' => env('APP_URL'),
+        ]);
+    });
 });
 
 Route::middleware(['auth:sanctum','role:ADMIN'])->prefix('admin')->group(function () {
@@ -43,11 +89,20 @@ Route::middleware(['auth:sanctum','role:ADMIN'])->prefix('admin')->group(functio
     Route::get('/dashboard/stats', [DashboardAdminController::class, 'stats']);
     Route::get('/dashboard/recent-orders', [DashboardAdminController::class, 'recentOrders']);
     Route::get('/analytics/overview', [AnalyticsAdminController::class, 'overview']);
+    Route::get('/analytics/aov', [AnalyticsExtraController::class, 'aov']);
+    Route::get('/analytics/unified', [AnalyticsExtraController::class, 'unified']);
+    Route::get('/analytics/advanced', [AnalyticsExtraController::class, 'advanced']);
     Route::get('/products', [ProductAdminController::class, 'index']);
     Route::post('/products', [ProductAdminController::class, 'store']);
     Route::put('/products/{product}', [ProductAdminController::class, 'update']);
     Route::delete('/products/{product}', [ProductAdminController::class, 'destroy']);
+    // Product images
+    Route::get('/products/{product}/images', [\App\Http\Controllers\Admin\ProductImageController::class, 'index']);
+    Route::post('/products/{product}/image', [\App\Http\Controllers\Admin\ProductImageController::class, 'store']);
+    Route::post('/products/{product}/images', [\App\Http\Controllers\Admin\ProductImageController::class, 'storeMany']);
+    Route::delete('/products/{product}/images/{image}', [\App\Http\Controllers\Admin\ProductImageController::class, 'destroy']);
     Route::get('/payment-options', [PaymentOptionAdminController::class, 'index']);
+    Route::get('/payments/options', [PaymentOptionAdminController::class, 'index']); // alias path to satisfy frontend
     Route::post('/payment-options', [PaymentOptionAdminController::class, 'store']);
     Route::put('/payment-options/{paymentOption}', [PaymentOptionAdminController::class, 'update']);
     Route::post('/payment-options/{paymentOption}/activate', [PaymentOptionAdminController::class, 'activate']);

@@ -1,13 +1,14 @@
 <?php
 
 namespace App\Models;
+use Laravel\Sanctum\HasApiTokens;
 
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Factories\HasFactory;
 
 class Payment extends Model
 {
-    use HasFactory;
+    use HasApiTokens, HasFactory;
 
     protected $fillable = [
         'order_id','user_id','amount','currency','method','channel','status','provider','provider_ref','external_request_id','external_transaction_id','phone_number','raw_request_payload','raw_callback_payload'

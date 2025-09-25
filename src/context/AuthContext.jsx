@@ -26,9 +26,9 @@ export function AuthProvider({ children }) {
     if (user) localStorage.setItem('auth_user', JSON.stringify(user)); else localStorage.removeItem('auth_user');
   }, [user]);
 
-  const login = useCallback(async (username, password) => {
+  const login = useCallback(async (identifier, password) => {
     try {
-      const res = await api.auth.login({ username, password });
+      const res = await api.auth.login({ identifier, password });
       setToken(res.token);
   const u = res.user;
       setUser(u);

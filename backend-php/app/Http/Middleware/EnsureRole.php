@@ -13,13 +13,19 @@ class EnsureRole
     {
         $user = $request->user();
         if (!$user) {
-            return response()->json(['error' => 'Unauthenticated'], 401);
+            return response()->json([
+                'success' => false,
+                'message' => 'Unauthenticated'
+            ], 401);
         }
 
         // Normalize target role via enum (falls back to USER if unknown)
         $required = Role::fromMixed($role);
         if ($user->role !== $required) {
-            return response()->json(['error' => 'Forbidden'], 403);
+            return response()->json([
+                'success' => false,
+                'message' => 'Forbidden'
+            ], 403);
         }
         return $next($request);
     }

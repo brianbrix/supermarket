@@ -3,14 +3,14 @@ import { useAuth } from '../../context/AuthContext.jsx';
 
 export default function AdminLogin() {
   const { login } = useAuth();
-  const [username, setUsername] = useState('admin');
+  const [identifier, setIdentifier] = useState('admin');
   const [password, setPassword] = useState('admin');
   const [submitting, setSubmitting] = useState(false);
 
   async function handleSubmit(e){
     e.preventDefault();
     setSubmitting(true);
-    await login(username, password);
+  await login(identifier, password);
     setSubmitting(false);
   }
 
@@ -19,8 +19,8 @@ export default function AdminLogin() {
       <h1 className="h4 mb-3">Admin Login</h1>
       <form onSubmit={handleSubmit} className="card p-3 shadow-sm">
         <div className="mb-3">
-          <label className="form-label small">Username</label>
-          <input className="form-control" value={username} onChange={e=>setUsername(e.target.value)} required autoFocus />
+          <label className="form-label small">Email or Username</label>
+          <input className="form-control" value={identifier} onChange={e=>setIdentifier(e.target.value)} required autoFocus />
         </div>
         <div className="mb-3">
           <label className="form-label small">Password</label>

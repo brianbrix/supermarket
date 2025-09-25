@@ -6,6 +6,7 @@ use App\Http\Controllers\Controller;
 use App\Models\User;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Hash;
+use Illuminate\Support\Facades\Schema;
 use Illuminate\Validation\ValidationException;
 
 class AuthController extends Controller
@@ -34,21 +35,37 @@ class AuthController extends Controller
 
     public function login(Request $request)
     {
+        // Support a single 'identifier' field (either email or username) for convenience.
         $data = $request->validate([
-            'username' => 'required_without:email',
-            'email' => 'required_without:username|email',
+            'identifier' => 'required_without_all:email,username|string',
+            'username' => 'sometimes|string',
+            'email' => 'sometimes|email',
             'password' => 'required'
         ]);
 
-        $user = User::query()
-            ->when(isset($data['username']), fn($q) => $q->where('username',$data['username']))
-            ->when(isset($data['email']), fn($q) => $q->where('email',$data['email']))
-            ->first();
+        $identifier = $data['identifier'] ?? $data['username'] ?? $data['email'] ?? null;
+        $query = User::query();
+        if ($identifier) {
+            if (Schema::hasColumn('users','username')) {
+                $query->where(function($q) use ($identifier) {
+                    $q->where('username', $identifier)->orWhere('email', $identifier);
+                });
+            } else {
+                $query->where('email', $identifier);
+            }
+        } else {
+            // Fallback to legacy separate fields if provided explicitly
+            $query
+                ->when(isset($data['username']) && Schema::hasColumn('users','username'), function($q) use ($data) { return $q->where('username',$data['username']); })
+                ->when(isset($data['email']), function($q) use ($data) { return $q->where('email',$data['email']); });
+        }
+        $user = $query->first();
 
         if (!$user || !Hash::check($data['password'], $user->password)) {
-            throw ValidationException::withMessages([
-                'credentials' => ['Invalid credentials']
-            ]);
+            return response()->json([
+                'success' => false,
+                'message' => 'Invalid credentials'
+            ], 401);
         }
         if (!$user->active) {
             return response()->json(['error' => 'User inactive'], 403);

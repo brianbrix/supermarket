@@ -21,15 +21,23 @@ export function configureAuthTokenGetter(fn){ authTokenGetter = fn; }
 async function request(path, options = {}) {
   const token = authTokenGetter();
   const headers = {
+    'Accept': 'application/json',
     ...(options.body instanceof FormData ? {} : { 'Content-Type': 'application/json' }),
     ...(options.headers || {})
   };
   if (token) headers['Authorization'] = `Bearer ${token}`;
   const res = await fetch(`${BASE_URL}${path}`, { headers, ...options });
   if (!res.ok) {
-    let errText;
-    try { errText = await res.text(); } catch { errText = res.statusText; }
-    throw new Error(`API ${res.status}: ${errText}`);
+    let raw = '';
+    try { raw = await res.text(); } catch { raw = res.statusText; }
+    // Attempt JSON parse even on error
+    let parsed;
+    try { parsed = JSON.parse(raw); } catch { /* ignore */ }
+    const message = parsed?.message || parsed?.error || raw || res.statusText;
+    const error = new Error(message);
+    error.status = res.status;
+    error.payload = parsed || raw;
+    throw error;
   }
   const ct = res.headers.get('content-type') || '';
   if (ct.includes('application/json')) return res.json();
