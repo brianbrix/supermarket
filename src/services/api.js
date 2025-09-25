@@ -93,22 +93,93 @@ export const api = {
         if (lowStockThreshold != null) params.set('lowStockThreshold', lowStockThreshold);
         if (revenueDays != null) params.set('revenueDays', revenueDays);
         return request(`/admin/analytics/overview?${params.toString()}`);
+      },
+      aov: ({ granularity = 'DAILY', periods } = {}) => {
+        const params = new URLSearchParams();
+        if (granularity) params.set('granularity', granularity);
+        if (periods != null) params.set('periods', periods);
+        const qs = params.toString();
+        return request(`/admin/analytics/aov${qs ? `?${qs}` : ''}`);
       }
     },
     orders: {
-      list: (page=0,size=20) => request(`/admin/orders?page=${page}&size=${size}`),
+      list: (page=0,size=20, filters={}) => {
+        const params = new URLSearchParams();
+        params.set('page', page); params.set('size', size);
+        const { q, status, from, to, minTotal, maxTotal, sort='createdAt', direction='desc' } = filters;
+        if (q) params.set('q', q);
+        if (status) params.set('status', status);
+        if (from) params.set('from', from); // ISO string expected
+        if (to) params.set('to', to);
+        if (minTotal != null) params.set('minTotal', minTotal);
+        if (maxTotal != null) params.set('maxTotal', maxTotal);
+        if (sort) params.set('sort', sort);
+        if (direction) params.set('direction', direction);
+        return request(`/admin/orders?${params.toString()}`);
+      },
       updateStatus: (id, status) => request(`/admin/orders/${id}/status?status=${encodeURIComponent(status)}`, { method: 'PUT' })
     },
     products: {
       create: (payload) => request('/admin/products', { method: 'POST', body: JSON.stringify(payload) }),
       update: (id, payload) => request(`/admin/products/${id}`, { method: 'PUT', body: JSON.stringify(payload) }),
-      delete: (id) => request(`/admin/products/${id}`, { method: 'DELETE' })
+      delete: (id) => request(`/admin/products/${id}`, { method: 'DELETE' }),
+      list: (page=0,size=20, filters={}) => {
+        const params = new URLSearchParams();
+        params.set('page', page); params.set('size', size);
+        const { q, categoryId, minPrice, maxPrice, inStock, sort='name', direction='asc' } = filters;
+        if (q) params.set('q', q);
+        if (categoryId) params.set('categoryId', categoryId);
+        if (minPrice != null) params.set('minPrice', minPrice);
+        if (maxPrice != null) params.set('maxPrice', maxPrice);
+        if (inStock != null) params.set('inStock', inStock);
+        if (sort) params.set('sort', sort);
+        if (direction) params.set('direction', direction);
+        return request(`/admin/products?${params.toString()}`);
+      }
     },
     payments: {
-      list: (page=0,size=20) => request(`/admin/payments?page=${page}&size=${size}`)
+      list: (page=0,size=20, filters={}) => {
+        const params = new URLSearchParams();
+        params.set('page', page); params.set('size', size);
+        const { q, status, method, from, to, minAmount, maxAmount, sort, direction } = filters;
+        if (q) params.set('q', q);
+        if (status) params.set('status', status);
+        if (method) params.set('method', method);
+        if (from) params.set('from', from);
+        if (to) params.set('to', to);
+        if (minAmount != null) params.set('minAmount', minAmount);
+        if (maxAmount != null) params.set('maxAmount', maxAmount);
+        if (sort) params.set('sort', sort);
+        if (direction) params.set('direction', direction);
+        return request(`/admin/payments?${params.toString()}`);
+      }
     },
     categories: {
       paged: (page=0,size=20) => request(`/admin/categories?page=${page}&size=${size}`),
+      // Flexible signature:
+      //   search(qString, page?, size?, sort?, direction?)
+      //   search({ q, page, size, sort, direction })
+      // This prevents mistakes like passing an object as the first param and
+      // getting q=[object Object] in the URL.
+      search: (arg, page=0, size=20, sort='name', direction='asc') => {
+        let q; let p = page; let s = size; let so = sort; let dir = direction;
+        if (typeof arg === 'object' && arg !== null && !(arg instanceof Date)) {
+          // Options object form
+            q = arg.q;
+            p = arg.page ?? page;
+            s = arg.size ?? size;
+            so = arg.sort ?? sort;
+            dir = arg.direction ?? direction;
+        } else {
+          q = arg; // primitive q (string/undefined)
+        }
+        const params = new URLSearchParams();
+        if (q) params.set('q', q);
+        params.set('page', p); params.set('size', s);
+        if (so) params.set('sort', so);
+        if (dir) params.set('direction', dir);
+        return request(`/admin/categories/search?${params.toString()}`);
+      },
       create: (payload) => request('/admin/categories', { method: 'POST', body: JSON.stringify(payload) }),
       update: (id, payload) => request(`/admin/categories/${id}`, { method: 'PUT', body: JSON.stringify(payload) }),
       delete: (id) => request(`/admin/categories/${id}`, { method: 'DELETE' })

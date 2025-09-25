@@ -1,5 +1,6 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useState, useRef } from 'react';
 import { api } from '../../services/api.js';
+import FilterBar from '../../components/FilterBar.jsx';
 
 export default function AdminCategories(){
   const [items, setItems] = useState([]);
@@ -8,16 +9,30 @@ export default function AdminCategories(){
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(null);
   const [form, setForm] = useState({ name:'', description:'' });
+  const [qDraft, setQDraft] = useState('');
+  const [qApplied, setQApplied] = useState('');
+  const debounceRef = useRef();
   const [editingId, setEditingId] = useState(null);
   const [submitting, setSubmitting] = useState(false);
 
   function load(){
     setLoading(true);
-    api.admin.categories.paged(page, 20)
-      .then(res=>{ setItems(res.content); setPageMeta(res); setLoading(false); })
-      .catch(e=>{ setError(e.message); setLoading(false); });
+    if (qApplied) {
+      api.admin.categories.search(qApplied, page, 20)
+        .then(res=>{ setItems(res.content || res); setPageMeta(res); setLoading(false); })
+        .catch(e=>{ setError(e.message); setLoading(false); });
+    } else {
+      api.admin.categories.paged(page, 20)
+        .then(res=>{ setItems(res.content); setPageMeta(res); setLoading(false); })
+        .catch(e=>{ setError(e.message); setLoading(false); });
+    }
   }
-  useEffect(()=>{ load(); }, [page]);
+  useEffect(()=>{ load(); }, [page, qApplied]);
+  useEffect(()=>{
+    clearTimeout(debounceRef.current);
+    debounceRef.current = setTimeout(()=>{ setQApplied(qDraft); setPage(0); }, 400);
+    return ()=> clearTimeout(debounceRef.current);
+  }, [qDraft]);
 
   function handleEdit(cat){
     setEditingId(cat.id);
@@ -47,10 +62,19 @@ export default function AdminCategories(){
 
   return (
     <div className="p-3 vstack gap-3">
-      <div className="d-flex align-items-center justify-content-between">
+      <div className="d-flex justify-content-between align-items-center flex-wrap gap-2">
         <h2 className="h5 mb-0">Categories</h2>
         <button className="btn btn-sm btn-primary" onClick={()=>{ setEditingId(null); setForm({ name:'', description:'' }); }}>New</button>
       </div>
+      <FilterBar>
+        <FilterBar.Field label="Search" width="col-12 col-md-4">
+          <div className="input-group input-group-sm">
+            <span className="input-group-text">Q</span>
+            <input className="form-control" placeholder="Name or description" value={qDraft} onChange={e=>setQDraft(e.target.value)} />
+            {qDraft && <button className="btn btn-outline-secondary" type="button" onClick={()=>setQDraft('')}>×</button>}
+          </div>
+        </FilterBar.Field>
+      </FilterBar>
       {error && <div className="alert alert-danger py-2 small mb-0">{error}</div>}
       <div className="row g-3">
         <div className="col-12 col-lg-7">

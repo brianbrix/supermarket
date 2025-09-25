@@ -37,3 +37,13 @@ report-*.
 # OS & misc
 Thumbs.db
 *.tgz
+
+# Backend (Spring Boot / Maven) artifacts
+backend/target
+backend/uploads
+backend/uploads-test
+backend/app.log
+backend/*.original
+*.iml
+.mvn/
+dependency-reduced-pom.xml

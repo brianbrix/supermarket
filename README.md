@@ -1,6 +1,14 @@
-## KenSuper – Minimal Kenyan Supermarket Front-end
+## KenSuper Monorepo – Front-end & Spring Boot Backend
 
-A lightweight demo supermarket UI built with React + Vite. Focused on simplicity and local (Kenyan) context: staple products, KES currency formatting, and a very small feature set.
+This repository now contains BOTH the React front-end and the Spring Boot backend (API + admin utilities) in a single mono-repo structure:
+
+```
+supermarket/
+  backend/   # Spring Boot (Maven, Java 21, Spring Boot 3.5.x)
+  src/       # React front-end source
+```
+
+The original lightweight UI (React + Vite) has been integrated with a real backend providing products, categories, orders, admin analytics and media uploads. Focus remains on a Kenyan retail context (KES currency, local product examples).
 
 ### Features
 - Product listing (static sample data: unga, sukuma wiki, maziwa, mandazi)
@@ -44,28 +52,33 @@ nvm install 22
 nvm use 22
 ```
 
-### Run Dev Server
+### Run Front-end Dev Server
 ```
 npm install
 npm run dev
 ```
 Visit the printed local URL (default http://localhost:5173 ).
 
-### Build & Preview
+### Build & Preview (Front-end)
 ```
 npm run build
 npm run preview
 ```
 
-### Structure
+### Repository Structure
 ```
+backend/
+  pom.xml
+  src/main/java/... (controllers, services, repositories, dto, domain)
+  src/main/resources/
+  uploads/ (runtime image storage)
 src/
-  components/ (Navbar, Footer, ProductCard, ProgressSteps)
-  pages/ (Home, Products, Cart, About, Checkout)
-  context/ (CartContext, ToastContext, ThemeContext)
-  services/ (orderService.js)
-  data/ (products.js)
-  utils/ (currency.js)
+  components/
+  pages/
+  context/
+  services/
+  data/
+  utils/
 ```
 
 ### Future Ideas
@@ -80,7 +93,30 @@ src/
 ### Notes
 Cart data is client-side only (localStorage). Replace sample data with live API when ready.
 
-## Backend Integration (Extended)
+## Backend (Spring Boot) Overview
+
+Java 21 + Spring Boot 3.5.x. Main app class: `backend/src/main/java/com/example/supermarket/SupermarketBackendApplication.java`.
+
+### Run Backend
+From repo root:
+```
+cd backend
+mvn spring-boot:run
+```
+Profiles: set `-Dspring.profiles.active=dev` as needed. Ensure PostgreSQL connection props are configured (env vars or `application.properties`).
+
+### Build Backend Jar
+```
+cd backend
+mvn clean package -DskipTests
+java -jar target/supermarket-backend-0.0.1-SNAPSHOT.jar
+```
+
+### Environment Variable for Front-end
+Create `.env` in repo root:
+```
+VITE_API_BASE_URL=http://localhost:8080/api
+```
 
 The frontend now integrates with a Spring Boot backend providing real products, categories, orders and admin utilities.
 
@@ -122,6 +158,11 @@ The home page now uses debounced queries for text (500ms) and range/stock/catego
 
 ---
 > NOTE: Ensure environment variable `VITE_API_BASE_URL` points to the backend origin (e.g. `http://localhost:8080/api`).
+
+### Monorepo Notes
+- Backend build artifacts (`backend/target`) & runtime uploads are gitignored.
+- No git submodules remain; everything lives in this single repo.
+- To upgrade dependencies, treat each side independently (npm / Maven).
 
 ---
 Feel free to adapt and extend. Karibu! 🇰🇪

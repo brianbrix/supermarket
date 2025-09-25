@@ -1,5 +1,6 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useState, useRef } from 'react';
 import { api } from '../../services/api.js';
+import FilterBar from '../../components/FilterBar.jsx';
 import PaginationBar from '../../components/PaginationBar.jsx';
 
 export default function AdminPayments() {
@@ -9,17 +10,92 @@ export default function AdminPayments() {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(null);
   const size = 20;
+  const [draftFilters, setDraftFilters] = useState({ q:'', status:'', method:'', from:'', to:'', minAmount:'', maxAmount:'', sort:'createdAt', direction:'desc' });
+  const [appliedFilters, setAppliedFilters] = useState({ q:'', status:'', method:'', from:'', to:'', minAmount:'', maxAmount:'', sort:'createdAt', direction:'desc' });
+  const debounceRef = useRef();
+  const firstDebounceRef = useRef(true); // skip first identical-to-default transition
+  const didInitialLoadRef = useRef(false); // guard StrictMode double invoke
 
-  useEffect(()=>{
-    setLoading(true);
-    api.admin.payments.list(page,size)
-      .then(resp => { setPayments(resp.content); setPageMeta(resp); setLoading(false); })
+  function load(immediate=false){
+    if (!immediate) setLoading(true);
+    const { q, status, method, from, to, minAmount, maxAmount, sort, direction } = appliedFilters;
+    const payload = {
+      ...(q?{q}:{}),
+      ...(status?{status}:{}),
+      ...(method?{method}:{}),
+      ...(from?{from}:{}),
+      ...(to?{to}:{}),
+      ...(minAmount?{minAmount}:{}),
+      ...(maxAmount?{maxAmount}:{}),
+      sort, direction
+    };
+    api.admin.payments.list(page,size,payload)
+      .then(resp => { setPayments(resp.content || resp); setPageMeta(resp); setLoading(false); })
       .catch(e => { setError(e.message); setLoading(false); });
-  }, [page]);
+  }
+  useEffect(()=>{
+    if(!didInitialLoadRef.current){
+      didInitialLoadRef.current = true;
+      load();
+      return;
+    }
+    load();
+  }, [page, appliedFilters]);
+  useEffect(()=>{
+    if (firstDebounceRef.current){ firstDebounceRef.current = false; return; }
+    clearTimeout(debounceRef.current);
+    debounceRef.current = setTimeout(()=>{ setAppliedFilters(a=>({ ...a, ...draftFilters })); setPage(0); }, 400);
+    return ()=> clearTimeout(debounceRef.current);
+  }, [draftFilters.q, draftFilters.status, draftFilters.method, draftFilters.from, draftFilters.to, draftFilters.minAmount, draftFilters.maxAmount]);
+  function updateFilter(name,value){ setDraftFilters(f=>({...f,[name]:value})); }
+  function applySort(e){ const [s,d]=e.target.value.split(':'); setDraftFilters(f=>({...f,sort:s,direction:d})); setAppliedFilters(a=>({...a,sort:s,direction:d})); setPage(0); load(true); }
+  function clearFilters(){ const base={ q:'', status:'', method:'', from:'', to:'', minAmount:'', maxAmount:'', sort:'createdAt', direction:'desc' }; setDraftFilters(base); setAppliedFilters(base); setPage(0); load(true); }
 
   return (
     <div className="container py-4">
       <h1 className="h4 mb-3">Payments</h1>
+      <FilterBar>
+        <FilterBar.Field label="Search" width="col-12 col-md-3">
+          <input className="form-control form-control-sm" placeholder="Customer / Ref" value={draftFilters.q} onChange={e=>updateFilter('q', e.target.value)} />
+        </FilterBar.Field>
+        <FilterBar.Field label="Status">
+          <select className="form-select form-select-sm" value={draftFilters.status} onChange={e=>updateFilter('status', e.target.value)}>
+            <option value="">All</option>
+            {['PENDING','COMPLETED','FAILED','REFUNDED'].map(s=> <option key={s} value={s}>{s}</option>)}
+          </select>
+        </FilterBar.Field>
+        <FilterBar.Field label="Method">
+          <select className="form-select form-select-sm" value={draftFilters.method} onChange={e=>updateFilter('method', e.target.value)}>
+            <option value="">All</option>
+            {['MOBILE','CARD','CASH','TRANSFER'].map(m=> <option key={m} value={m}>{m}</option>)}
+          </select>
+        </FilterBar.Field>
+        <FilterBar.Field label="From">
+          <input type="date" className="form-control form-control-sm" value={draftFilters.from ? draftFilters.from.substring(0,10): ''} onChange={e=>updateFilter('from', e.target.value ? new Date(e.target.value).toISOString(): '')} />
+        </FilterBar.Field>
+        <FilterBar.Field label="To">
+          <input type="date" className="form-control form-control-sm" value={draftFilters.to ? draftFilters.to.substring(0,10): ''} onChange={e=>updateFilter('to', e.target.value ? new Date(e.target.value).toISOString(): '')} />
+        </FilterBar.Field>
+        <FilterBar.Field label="Min">
+          <input type="number" className="form-control form-control-sm" value={draftFilters.minAmount} onChange={e=>updateFilter('minAmount', e.target.value)} />
+        </FilterBar.Field>
+        <FilterBar.Field label="Max">
+          <input type="number" className="form-control form-control-sm" value={draftFilters.maxAmount} onChange={e=>updateFilter('maxAmount', e.target.value)} />
+        </FilterBar.Field>
+        <FilterBar.Field label="Sort" width="col-6 col-md-2">
+          <select className="form-select form-select-sm" value={`${draftFilters.sort}:${draftFilters.direction}`} onChange={applySort}>
+            <option value="createdAt:desc">Newest</option>
+            <option value="createdAt:asc">Oldest</option>
+            <option value="amount:desc">Amount High→Low</option>
+            <option value="amount:asc">Amount Low→High</option>
+            <option value="status:asc">Status A→Z</option>
+            <option value="status:desc">Status Z→A</option>
+            <option value="id:asc">ID Asc</option>
+            <option value="id:desc">ID Desc</option>
+          </select>
+        </FilterBar.Field>
+  <FilterBar.Reset onClick={clearFilters} disabled={!draftFilters.q && !draftFilters.status && !draftFilters.method && !draftFilters.from && !draftFilters.to && !draftFilters.minAmount && !draftFilters.maxAmount} />
+      </FilterBar>
       {loading ? <p>Loading...</p> : error ? <div className="alert alert-danger">{error}</div> : (
         <div className="table-responsive small">
           <table className="table table-sm align-middle">

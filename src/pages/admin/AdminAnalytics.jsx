@@ -7,6 +7,10 @@ export default function AdminAnalytics(){
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(null);
   const [trendMode, setTrendMode] = useState('daily'); // 'daily' | 'weekly' | 'monthly'
+  const [aovData, setAovData] = useState(null);
+  const [aovGranularity, setAovGranularity] = useState('DAILY');
+  const [aovLoading, setAovLoading] = useState(false);
+  const [aovError, setAovError] = useState(null);
 
   useEffect(()=>{
     let active = true;
@@ -19,6 +23,15 @@ export default function AdminAnalytics(){
       .catch(e=>{ if(!active) return; setError(e.message); setLoading(false); });
     return ()=>{ active = false; };
   },[]);
+
+  useEffect(()=>{
+    let active = true;
+    setAovLoading(true); setAovError(null);
+    api.admin.analytics.aov({ granularity: aovGranularity })
+      .then(data => { if(!active) return; setAovData(data); setAovLoading(false); })
+      .catch(e => { if(!active) return; setAovError(e.message); setAovLoading(false); });
+    return ()=>{ active = false; };
+  }, [aovGranularity]);
 
   return (
     <div className="container py-4">
@@ -33,10 +46,10 @@ export default function AdminAnalytics(){
           <AnalyticCard title="Total Orders" value={stats.totalOrders} />
           <AnalyticCard title="Revenue" value={`KES ${Number(stats.totalRevenue||0).toFixed(2)}`} />
           <AnalyticCard title="Products" value={stats.totalProducts} />
-          <AnalyticCard title="Admins" value={stats.totalAdmins} />
-          <AnalyticCard title="Pending" value={stats.pendingOrders} />
-          <AnalyticCard title="Processing" value={stats.processingOrders} />
-          <AnalyticCard title="Completed" value={stats.completedOrders} />
+            <AnalyticCard title="Admins" value={stats.totalAdmins} />
+            <AnalyticCard title="Pending" value={stats.pendingOrders} />
+            <AnalyticCard title="Processing" value={stats.processingOrders} />
+            <AnalyticCard title="Completed" value={stats.completedOrders} />
         </div>
       )}
       {extended && (
@@ -74,10 +87,11 @@ export default function AdminAnalytics(){
           </section>
         </>
       )}
+      <AovSection data={aovData} loading={aovLoading} error={aovError} granularity={aovGranularity} onGranularityChange={setAovGranularity} />
       <section className="mb-5">
         <h2 className="h6 mb-3">Coming Soon</h2>
         <ul className="small text-muted mb-0">
-          <li>Average order value vs time</li>
+          <li><s>Average order value vs time</s> (Implemented)</li>
           <li>Repeat customer rate</li>
           <li>Churn & retention metrics</li>
           <li>Order status funnel conversion</li>
@@ -185,22 +199,79 @@ function ChartSkeleton(){
 
 function StatusFunnel({ stats }) {
   const stages = [
-    { label:'Pending', value: stats.pendingOrders },
-    { label:'Processing', value: stats.processingOrders },
-    { label:'Completed', value: stats.completedOrders }
+    { label:'Pending', value: stats.pendingOrders, color:'bg-secondary' },
+    { label:'Processing', value: stats.processingOrders, color:'bg-primary' },
+    { label:'Shipped', value: stats.shippedOrders, color:'bg-info' },
+    { label:'Delivered', value: stats.deliveredOrders, color:'bg-success' },
+    { label:'Cancelled', value: stats.cancelledOrders, color:'bg-warning' },
+    { label:'Refunded', value: stats.refundedOrders, color:'bg-danger' }
   ];
   const max = Math.max(...stages.map(s=>s.value),1);
   return (
-    <div className="vstack gap-1" style={{maxWidth:'420px'}}>
+    <div className="vstack gap-1" style={{maxWidth:'540px'}}>
       {stages.map(s => (
         <div key={s.label} className="d-flex align-items-center gap-2">
-          <div style={{width:'80px'}} className="small text-muted">{s.label}</div>
+          <div style={{width:'90px'}} className="small text-muted">{s.label}</div>
           <div className="flex-grow-1 bg-body-tertiary rounded position-relative" style={{height:'18px'}}>
-            <div className="bg-primary h-100 rounded" style={{width:`${(s.value/max)*100}%`}}></div>
+            <div className={`${s.color} h-100 rounded`} style={{width:`${(s.value/max)*100}%`, transition:'width .4s'}}></div>
             <div className="position-absolute top-0 start-50 translate-middle-x small" style={{lineHeight:'18px'}}>{s.value}</div>
           </div>
         </div>
       ))}
+    </div>
+  );
+}
+
+function AovSection({ data, loading, error, granularity, onGranularityChange }) {
+  return (
+    <section className="mb-5">
+      <div className="d-flex align-items-center justify-content-between mb-2 flex-wrap gap-2">
+        <h2 className="h6 m-0">Average Order Value ({granularity}) {data && data.percentChange != null && (
+          <span className={`badge ms-2 ${data.percentChange > 0 ? 'text-bg-success':'text-bg-danger'}`}>{data.percentChange > 0 ? '+' : ''}{Number(data.percentChange).toFixed(2)}%</span>
+        )}</h2>
+        <div className="btn-group btn-group-sm" role="group" aria-label="AOV granularity">
+          {['DAILY','WEEKLY','MONTHLY'].map(g => (
+            <button key={g} type="button" className={`btn btn-${granularity===g?'primary':'outline-primary'}`} onClick={()=>onGranularityChange(g)}>{g.charAt(0)+g.slice(1).toLowerCase()}</button>
+          ))}
+        </div>
+      </div>
+      {loading && <ChartSkeleton />}
+      {error && <div className="alert alert-danger small mb-0">{error}</div>}
+      {data && !loading && !error && (
+        data.series.length === 0 ? <p className="text-muted small mb-0">No orders yet.</p> : (
+          <AovMiniChart points={data.series} granularity={granularity} />
+        )
+      )}
+      {data && !loading && !error && (
+        <div className="row row-cols-2 row-cols-sm-5 g-2 mt-3 small">
+          <div className="col"><div className="p-2 bg-body-tertiary rounded">Current AOV<br/><strong>KES {Number(data.currentAov||0).toFixed(2)}</strong></div></div>
+          <div className="col"><div className="p-2 bg-body-tertiary rounded">Previous AOV<br/><strong>KES {Number(data.previousAov||0).toFixed(2)}</strong></div></div>
+          <div className="col"><div className="p-2 bg-body-tertiary rounded">Buckets<br/><strong>{data.series.length}</strong></div></div>
+          <div className="col"><div className="p-2 bg-body-tertiary rounded">Orders (Total)<br/><strong>{data.series.reduce((s,p)=>s+p.orderCount,0)}</strong></div></div>
+          <div className="col"><div className="p-2 bg-body-tertiary rounded">Gross (Sum)<br/><strong>KES {data.series.reduce((s,p)=>s+Number(p.grossTotal||0),0).toFixed(2)}</strong></div></div>
+        </div>
+      )}
+    </section>
+  );
+}
+
+function AovMiniChart({ points, granularity, height=160 }) {
+  const max = Math.max(...points.map(p => Number(p.aov)), 1);
+  return (
+    <div className="position-relative">
+      <div className="d-flex align-items-end gap-1" style={{height:`${height}px`, overflowX:'auto'}}>
+        {points.map((p,i) => {
+          const val = Number(p.aov);
+          const h = (val/max)*(height-40);
+          const label = granularity === 'DAILY' ? p.start.slice(5,10) : granularity === 'WEEKLY' ? p.start.slice(5,10) : p.start.slice(0,7);
+          return (
+            <div key={i} className="d-flex flex-column align-items-center position-relative" style={{minWidth:'40px'}}>
+              <div className="w-100 rounded-top bg-info position-relative" style={{height:`${h}px`, transition:'height .3s'}} role="img" aria-label={`AOV ${label}: KES ${val.toFixed(2)}`}></div>
+              <small className="text-muted mt-1" style={{fontSize:'0.55rem'}}>{label}</small>
+            </div>
+          );
+        })}
+      </div>
     </div>
   );
 }

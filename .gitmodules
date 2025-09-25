@@ -1,4 +1,1 @@
-[submodule "supermarket-backend"]
-	path = supermarket-backend
-	url = https://github.com/brianbrix/supermarket-backend.git
-	branch = main
+## Former submodule removed during monorepo consolidation. File intentionally left blank.
