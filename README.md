@@ -220,3 +220,17 @@ If you had data rows using `MPESA_SEND_MONEY` or `AIRTEL_SEND_MONEY`, they shoul
 
 ## Documentation Change Log
 - 2025-09-25: Removed configurable send money channels; clarified STK capability and updated required field matrix.
+
+## Continuous Integration (CI)
+A lightweight GitHub Actions workflow (`.github/workflows/ci.yml`) builds both backend and frontend on pushes and pull requests to `dev` and `main`:
+- Backend job: JDK 21, Maven dependency cache, `mvn -DskipTests clean package` then `mvn test`.
+- Frontend job: Node 20 with npm cache, `npm ci` then `npm run build`.
+- Artifacts uploaded:
+  - `backend-jar` – Spring Boot re-packaged JAR
+  - `frontend-dist` – Production-ready Vite build output
+
+Extend ideas:
+- Add lint step (`npm run lint`, `mvn -q verify` with extra plugins)
+- Add Docker image build & push (use `actions/setup-buildx-action` + `docker/build-push-action`)
+- Add test matrix (multiple Java or Node versions) if compatibility becomes a concern
+- Integrate security scanning (Dependabot alerts, `mvn -DskipTests org.owasp:dependency-check:check`, `npm audit --audit-level=high`)

@@ -1,0 +1,75 @@
+name: CI
+
+on:
+  push:
+    branches: [ dev, main ]
+  pull_request:
+    branches: [ dev, main ]
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  backend:
+    name: Backend (Maven + JDK 21)
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+      - name: Set up JDK
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '21'
+          cache: maven
+      - name: Maven Build
+        working-directory: backend
+        run: mvn -B -DskipTests clean package
+      - name: Run Tests
+        if: success()
+        working-directory: backend
+        run: mvn -B test
+      - name: Upload Backend Artifact
+        if: success()
+        uses: actions/upload-artifact@v4
+        with:
+          name: backend-jar
+          path: backend/target/*-SNAPSHOT.jar
+          if-no-files-found: warn
+
+  frontend:
+    name: Frontend (Node + Vite)
+    runs-on: ubuntu-latest
+    needs: backend
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+      - name: Use Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          cache: 'npm'
+      - name: Install Dependencies
+        run: npm ci
+      - name: Build
+        run: npm run build
+      - name: Upload Frontend Dist
+        uses: actions/upload-artifact@v4
+        with:
+          name: frontend-dist
+          path: dist
+          if-no-files-found: error
+
+  summary:
+    name: Summary
+    runs-on: ubuntu-latest
+    needs: [backend, frontend]
+    steps:
+      - name: Job Summary
+        run: |
+          echo "## Build Summary" >> $GITHUB_STEP_SUMMARY
+          echo "Backend and frontend builds completed successfully." >> $GITHUB_STEP_SUMMARY
+          echo "Artifacts:" >> $GITHUB_STEP_SUMMARY
+          echo "- Backend JAR (backend-jar)" >> $GITHUB_STEP_SUMMARY
+          echo "- Frontend build (frontend-dist)" >> $GITHUB_STEP_SUMMARY
