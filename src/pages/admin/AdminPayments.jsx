@@ -42,7 +42,7 @@ export default function AdminPayments() {
       return;
     }
     load();
-  }, [page, appliedFilters]);
+  }, [page, size, appliedFilters]);
   useEffect(()=>{
     if (firstDebounceRef.current){ firstDebounceRef.current = false; return; }
     clearTimeout(debounceRef.current);

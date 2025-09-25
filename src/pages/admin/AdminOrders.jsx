@@ -59,7 +59,7 @@ export default function AdminOrders() {
       return;
     }
     load();
-  }, [page, appliedFilters]);
+  }, [page, size, appliedFilters]);
 
   // Debounced filters for expensive queries
   useEffect(()=>{

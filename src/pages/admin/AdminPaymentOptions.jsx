@@ -57,7 +57,7 @@ export default function AdminPaymentOptions(){
     } finally { setLoading(false); }
   }
 
-  useEffect(()=>{ load(); },[page]);
+  useEffect(()=>{ load(); },[page, size]);
 
   function openCreate(){ setEditing(null); setForm(baseForm()); dialogRef.current.showModal(); }
   function openEdit(opt){ setEditing(opt); setForm({ ...opt }); dialogRef.current.showModal(); }
