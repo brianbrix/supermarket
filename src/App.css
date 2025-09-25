@@ -26,7 +26,8 @@
 
 /* Dark mode variables */
 :root { --bg:#fafafa; --text:#222; --surface:#fff; --border:#e3e3e3; --accent:#0a5c2b; --accent-alt:#137d3b; }
-[data-theme='dark'] { --bg:#121512; --text:#f3f5f3; --surface:#1e211e; --border:#2d322d; --accent:#1b8b48; --accent-alt:#24a258; }
+/* Dark theme adjusted to neutral dark greys instead of near-black */
+[data-theme='dark'] { --bg:#1f2224; --text:#f2f4f5; --surface:#2a2d30; --border:#3a3f42; --accent:#1b8b48; --accent-alt:#24a258; }
 body, #root, .layout { background:var(--bg); color:var(--text); }
 .nav { background:var(--surface); border-bottom:1px solid var(--border); }
 footer.footer { background:var(--surface); border-top:1px solid var(--border); }
@@ -94,4 +95,57 @@ table.cart-table input { width:60px; }
   .card, .card * { visibility:visible; }
   .card { position:absolute; left:0; top:0; width:280px; box-shadow:none !important; border:0 !important; }
   nav, footer, .navbar, .mobile-cart-bar { display:none !important; }
+}
+
+/* Payment Option Modal Enhancements */
+.payment-option-modal::backdrop { background: rgba(0,0,0,0.45); backdrop-filter: blur(2px); }
+.payment-option-modal { border: none; padding: 0; border-radius: 16px; box-shadow: 0 8px 32px -4px rgba(0,0,0,0.35); max-width: 520px; width: 100%; }
+.payment-option-modal .pom-header h2 { font-weight: 600; letter-spacing: .3px; }
+.payment-option-modal .pom-logo-wrapper { flex-shrink:0; }
+.payment-option-modal .pom-logo-wrapper .pom-logo { display:block; }
+.payment-option-modal form input.form-control { font-size: .9rem; }
+.payment-option-modal .form-text { font-size: .65rem; }
+
+/* Silver themed surface for payment modal */
+.payment-option-modal .pom-surface { background: linear-gradient(135deg,#f0f1f3,#e2e4e7 55%,#d7dadd); border-radius:16px; overflow:hidden; }
+/* Also apply silver theme for admin payment option config dialog */
+.payment-option-modal.admin-config .pom-surface { background: linear-gradient(135deg,#f0f1f3,#e2e4e7 55%,#d7dadd); }
+.payment-option-modal .pom-header { background: rgba(255,255,255,0.6); backdrop-filter: blur(4px); }
+.payment-option-modal .pom-body { background: linear-gradient(180deg,rgba(255,255,255,0.55),rgba(255,255,255,0.35)); }
+.payment-option-modal .reconcile-block { background: rgba(255,255,255,0.75)!important; }
+[data-theme='dark'] .payment-option-modal .pom-surface { background: linear-gradient(135deg,#2b2e30,#26292b 60%,#212426); }
+[data-theme='dark'] .payment-option-modal.admin-config .pom-surface { background: linear-gradient(135deg,#2b2e30,#26292b 60%,#212426); }
+[data-theme='dark'] .payment-option-modal .pom-header { background: rgba(40,43,45,0.75); }
+[data-theme='dark'] .payment-option-modal .pom-body { background: linear-gradient(180deg,rgba(50,53,55,0.55),rgba(45,48,50,0.35)); }
+[data-theme='dark'] .payment-option-modal .reconcile-block { background: rgba(70,74,78,0.75)!important; }
+/* Improve modal instructions heading contrast */
+.payment-option-modal .instructions-heading { color:#2d3235; background:linear-gradient(90deg,rgba(255,255,255,0.9),rgba(255,255,255,0)); padding:.25rem .5rem; border-left:4px solid #137d3b; border-radius:4px; }
+[data-theme='dark'] .payment-option-modal .instructions-heading { color:#eef1f2; background:linear-gradient(90deg,rgba(60,63,66,0.85),rgba(60,63,66,0)); border-left-color:#24a258; }
+/* Force higher contrast for small text in modal */
+.payment-option-modal .small, .payment-option-modal small { color:#2f3437; }
+[data-theme='dark'] .payment-option-modal .small, [data-theme='dark'] .payment-option-modal small { color:#d8dcdf; }
+/* Inputs contrast adjustments */
+[data-theme='dark'] .payment-option-modal input.form-control, [data-theme='dark'] .payment-option-modal input.form-control-sm { background:#383c3f; color:#f2f4f5; border-color:#4a5053; }
+[data-theme='dark'] .payment-option-modal input.form-control:focus { border-color:#24a258; box-shadow:0 0 0 2px rgba(36,162,88,.3); }
+/* Buttons outline variant visibility */
+[data-theme='dark'] .payment-option-modal .btn.btn-outline-secondary { color:#e3e6e8; border-color:#5a6063; }
+[data-theme='dark'] .payment-option-modal .btn.btn-outline-secondary:hover { background:#44484b; }
+[data-theme='dark'] .payment-option-modal .btn.btn-outline-primary { color:#e6f8ed; border-color:#24a258; }
+[data-theme='dark'] .payment-option-modal .btn.btn-outline-primary:hover { background:#24a258; color:#fff; }
+/* Animations for fallback sections */
+.payment-option-modal .fade-in { animation: fadeIn .4s ease both; }
+.payment-option-modal .slide-up { animation: slideUp .45s ease both; }
+@keyframes fadeIn { from { opacity:0; } to { opacity:1; } }
+@keyframes slideUp { from { opacity:0; transform: translateY(8px); } to { opacity:1; transform: translateY(0); } }
+/* Divider label */
+.payment-option-modal .manual-divider { letter-spacing:.5px; color:#3a3f42; }
+[data-theme='dark'] .payment-option-modal .manual-divider { color:#c9ced1; }
+
+/* Payment Option buttons on Checkout */
+button.btn.btn-light.border.position-relative { transition: border-color .2s, box-shadow .2s; }
+button.btn.btn-light.border.position-relative:hover { border-color: #999; box-shadow: 0 2px 6px rgba(0,0,0,0.08); }
+button.btn.btn-light.border.position-relative:focus-visible { outline: 2px solid #198754; outline-offset:2px; }
+
+@media (max-width:600px) {
+  .payment-option-modal { max-width: 94vw; }
 }

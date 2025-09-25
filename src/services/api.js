@@ -45,11 +45,18 @@ export const api = {
     requestPasswordReset: (email) => request('/auth/password-reset/request', { method: 'POST', body: JSON.stringify({ email }) }),
     confirmPasswordReset: (payload) => request('/auth/password-reset/confirm', { method: 'POST', body: JSON.stringify(payload) })
   },
+  payments: {
+    initiateMobileMoney: (payload) => request('/payments/mobile-money/initiate', { method: 'POST', body: JSON.stringify(payload) }),
+    initiateManual: (payload) => request('/payments/manual/initiate', { method: 'POST', body: JSON.stringify(payload) }),
+    reconcileManual: (payload) => request('/payments/manual/reconcile', { method: 'POST', body: JSON.stringify(payload) }),
+    byOrder: (orderId) => request(`/payments/order/${orderId}`),
+    options: () => request('/payments/options')
+  },
   products: {
-    list: (page=0,size=20) => request(`/products?page=${page}&size=${size}`),
+    list: (page=0,size=10) => request(`/products?page=${page}&size=${size}`),
     get: (id) => request(`/products/${id}`),
     byCategory: (cat) => request(`/products/category/${encodeURIComponent(cat)}`),
-    search: ({ q, categoryId, minPrice, maxPrice, inStock, page=0, size=20 } = {}) => {
+    search: ({ q, categoryId, minPrice, maxPrice, inStock, page=0, size=10 } = {}) => {
       const params = new URLSearchParams();
       if (q) params.set('q', q);
       if (categoryId) params.set('categoryId', categoryId);
@@ -82,7 +89,7 @@ export const api = {
     get: (id) => request(`/orders/${id}`)
   },
   user: {
-    orders: (page=0,size=20) => request(`/user/orders?page=${page}&size=${size}`)
+    orders: (page=0,size=10) => request(`/user/orders?page=${page}&size=${size}`)
   },
   admin: {
     stats: () => request('/admin/dashboard/stats'),
@@ -121,7 +128,7 @@ export const api = {
       }
     },
     orders: {
-      list: (page=0,size=20, filters={}) => {
+      list: (page=0,size=10, filters={}) => {
         const params = new URLSearchParams();
         params.set('page', page); params.set('size', size);
         const { q, status, from, to, minTotal, maxTotal, sort='createdAt', direction='desc' } = filters;
@@ -141,7 +148,7 @@ export const api = {
       create: (payload) => request('/admin/products', { method: 'POST', body: JSON.stringify(payload) }),
       update: (id, payload) => request(`/admin/products/${id}`, { method: 'PUT', body: JSON.stringify(payload) }),
       delete: (id) => request(`/admin/products/${id}`, { method: 'DELETE' }),
-      list: (page=0,size=20, filters={}) => {
+      list: (page=0,size=10, filters={}) => {
         const params = new URLSearchParams();
         params.set('page', page); params.set('size', size);
         const { q, categoryId, minPrice, maxPrice, inStock, sort='name', direction='asc' } = filters;
@@ -156,7 +163,7 @@ export const api = {
       }
     },
     payments: {
-      list: (page=0,size=20, filters={}) => {
+      list: (page=0,size=10, filters={}) => {
         const params = new URLSearchParams();
         params.set('page', page); params.set('size', size);
         const { q, status, method, from, to, minAmount, maxAmount, sort, direction } = filters;
@@ -170,16 +177,22 @@ export const api = {
         if (sort) params.set('sort', sort);
         if (direction) params.set('direction', direction);
         return request(`/admin/payments?${params.toString()}`);
+      },
+      options: {
+        list: () => request('/admin/payments/options'),
+        create: (payload) => request('/admin/payments/options', { method:'POST', body: JSON.stringify(payload)}),
+        update: (id,payload) => request(`/admin/payments/options/${id}`, { method:'PUT', body: JSON.stringify(payload)}),
+        delete: (id) => request(`/admin/payments/options/${id}`, { method:'DELETE' })
       }
     },
     categories: {
-      paged: (page=0,size=20) => request(`/admin/categories?page=${page}&size=${size}`),
+      paged: (page=0,size=10) => request(`/admin/categories?page=${page}&size=${size}`),
       // Flexible signature:
       //   search(qString, page?, size?, sort?, direction?)
       //   search({ q, page, size, sort, direction })
       // This prevents mistakes like passing an object as the first param and
       // getting q=[object Object] in the URL.
-      search: (arg, page=0, size=20, sort='name', direction='asc') => {
+      search: (arg, page=0, size=10, sort='name', direction='asc') => {
         let q; let p = page; let s = size; let so = sort; let dir = direction;
         if (typeof arg === 'object' && arg !== null && !(arg instanceof Date)) {
           // Options object form
@@ -229,3 +242,11 @@ export function mapProductResponse(p) {
     categoryId: p.categoryId
   };
 }
+
+import mpesaLogo from '../assets/mpesa.svg';
+import airtelLogo from '../assets/airtel.svg';
+
+export const paymentBranding = {
+  MPESA: { color: '#1A7F37', bg: '#e6f5ec', logoText: 'M-Pesa', logo: mpesaLogo, ring: '#32b768' },
+  AIRTEL: { color: '#e60000', bg: '#fdeaea', logoText: 'Airtel', logo: airtelLogo, ring: '#ff4d4d' }
+};

@@ -5,7 +5,7 @@ import PaginationBar from '../../components/PaginationBar.jsx';
 
 export default function AdminProducts() {
   const [products, setProducts] = useState([]);
-  const [pageMeta, setPageMeta] = useState({ page:0, size:20, totalElements:0, totalPages:0, first:true, last:true });
+  const [pageMeta, setPageMeta] = useState({ page:0, size:10, totalElements:0, totalPages:0, first:true, last:true });
   const [page, setPage] = useState(0);
   const size = 20;
   const [loading, setLoading] = useState(true);

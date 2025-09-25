@@ -19,6 +19,7 @@ import AdminLogin from './pages/admin/AdminLogin.jsx';
 import CustomerLogin from './pages/CustomerLogin.jsx';
 import Register from './pages/Register.jsx';
 import Orders from './pages/Orders.jsx';
+import AdminPaymentOptions from './pages/admin/AdminPaymentOptions.jsx';
 // Placeholder profile/settings pages
 function ProfilePage() { return <div className="container py-4"><h1 className="h4 mb-3">Profile</h1><p className="text-muted">User profile details will appear here.</p></div>; }
 function SettingsPage() { return <div className="container py-4"><h1 className="h4 mb-3">Settings</h1><p className="text-muted">Account settings will appear here.</p></div>; }
@@ -64,6 +65,7 @@ export default function App() {
                       <Route path="payments" element={<AdminPayments />} />
                       <Route path="analytics" element={<AdminAnalytics />} />
                       <Route path="categories" element={<AdminCategories />} />
+                      <Route path="payment-options" element={<AdminPaymentOptions />} />
                     </Route>
                     <Route path="/profile" element={<ProfilePage />} />
                     <Route path="/settings" element={<SettingsPage />} />

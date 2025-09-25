@@ -10,7 +10,7 @@ export default function Home() {
   const [categoryId, setCategoryId] = useState('all');
   const [categories, setCategories] = useState([]);
   const [results, setResults] = useState([]);
-  const [pageMeta, setPageMeta] = useState({ page:0, size:20, totalElements:0, totalPages:0, first:true, last:true });
+  const [pageMeta, setPageMeta] = useState({ page:0, size:100, totalElements:0, totalPages:0, first:true, last:true });
   const [page, setPage] = useState(0);
   const size = 20;
   const [loading, setLoading] = useState(true);

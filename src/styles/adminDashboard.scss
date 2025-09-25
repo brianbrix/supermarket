@@ -1,0 +1,113 @@
+// Admin Dashboard Dedicated Styles
+// Color system inspired by Tailwind-esque palette blended with Bootstrap utility compatibility
+
+$radius-card: 14px;
+$shadow-card: 0 4px 12px -2px rgba(0,0,0,0.18), 0 2px 4px -1px rgba(0,0,0,0.06);
+
+$gradient-indigo: linear-gradient(135deg,#6366f1,#818cf8);
+$gradient-sky: linear-gradient(135deg,#0ea5e9,#38bdf8);
+$gradient-amber: linear-gradient(135deg,#f59e0b,#fbbf24);
+$gradient-violet: linear-gradient(135deg,#6366f1,#9333ea);
+$gradient-emerald: linear-gradient(135deg,#10b981,#34d399);
+$gradient-rose: linear-gradient(135deg,#ef4444,#f87171);
+
+.admin-dashboard {
+  .stat-card {
+    position: relative;
+    border-radius: $radius-card;
+    padding: .9rem .85rem;
+    box-shadow: $shadow-card;
+    color: #fff;
+    display: flex;
+    flex-direction: column;
+    min-height: 110px;
+    overflow: hidden;
+    isolation: isolate;
+
+    &::after { // subtle sheen
+      content: "";
+      position: absolute;
+      inset: 0;
+      background: radial-gradient(circle at 85% 15%, rgba(255,255,255,.35), transparent 60%);
+      mix-blend-mode: overlay;
+      pointer-events: none;
+    }
+
+    .stat-label {
+      font-size: .65rem;
+      text-transform: uppercase;
+      letter-spacing: .5px;
+      opacity: .85;
+      display: flex;
+      align-items: center;
+      gap: .4rem;
+    }
+
+    .stat-value {
+      font-size: 1.15rem;
+      font-weight: 600;
+      line-height: 1;
+      margin-top: .25rem;
+    }
+  }
+
+  .recent-orders-card {
+    border: 0;
+    box-shadow: $shadow-card;
+    border-radius: $radius-card;
+
+    .card-header {
+      background: linear-gradient(to right,#f8fafc,#eef2ff);
+      border: 0;
+      padding-top: .65rem;
+      padding-bottom: .65rem;
+      border-top-left-radius: $radius-card;
+      border-top-right-radius: $radius-card;
+    }
+  }
+
+  table.admin-recent-orders {
+    thead {
+      background: linear-gradient(90deg,#1e293b,#334155);
+      color: #f1f5f9;
+      th { font-weight: 500; font-size: .7rem; letter-spacing: .5px; }
+    }
+    tbody {
+      tr { transition: background .15s ease; }
+      tr:hover { background: #f1f5f980; }
+    }
+    .status-select {
+      font-size: .7rem;
+      padding-top: .2rem; padding-bottom: .2rem; height: auto;
+    }
+  }
+
+  // Status chips (read-only rendering when not editing or small badges if needed later)
+  .status-badge {
+    display: inline-flex;
+    align-items: center;
+    gap: .3rem;
+    font-size: .65rem;
+    font-weight: 600;
+    padding: .25rem .5rem;
+    border-radius: 2rem;
+    letter-spacing: .4px;
+    line-height: 1;
+    white-space: nowrap;
+
+    &.PENDING { background: #fff7ed; color: #c2410c; border: 1px solid #fed7aa; }
+    &.PROCESSING { background: #eef2ff; color: #4338ca; border: 1px solid #c7d2fe; }
+    &.SHIPPED { background: #ecfdf5; color: #047857; border: 1px solid #a7f3d0; }
+    &.DELIVERED { background: #f0fdf4; color: #15803d; border: 1px solid #bbf7d0; }
+    &.CANCELLED { background: #fef2f2; color: #b91c1c; border: 1px solid #fecaca; }
+    &.REFUNDED { background: #fdf4ff; color: #a21caf; border: 1px solid #f5d0fe; }
+  }
+
+  // Utility to render gradient backgrounds via data attr if needed in future
+  [data-gradient="indigo"] { background: $gradient-indigo; }
+  [data-gradient="sky"] { background: $gradient-sky; }
+  [data-gradient="amber"] { background: $gradient-amber; }
+  [data-gradient="violet"] { background: $gradient-violet; }
+  [data-gradient="emerald"] { background: $gradient-emerald; }
+  [data-gradient="rose"] { background: $gradient-rose; }
+}

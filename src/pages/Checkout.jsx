@@ -11,9 +11,10 @@ import pdfFonts from 'pdfmake/build/vfs_fonts';
 // Attach virtual file system fonts (handles different export shapes)
 pdfMake.vfs = (pdfFonts?.pdfMake?.vfs) || pdfFonts.vfs || pdfMake.vfs;
 import ProgressSteps from '../components/ProgressSteps.jsx';
-import { generateOrderRef, initiatePayment, sendEmailMock } from '../services/orderService.js';
-import { api } from '../services/api.js';
-import { BRAND_NAME, BRAND_RECEIPT_TITLE, BRAND_COPY_FOOTER } from '../config/brand.js';
+import { generateOrderRef, sendEmailMock } from '../services/orderService.js';
+import { useMobileMoneyPayment } from '../hooks/useMobileMoneyPayment.js';
+import PaymentOptionModal from '../components/PaymentOptionModal.jsx';
+import { paymentBranding, api } from '../services/api.js';
 
 export default function Checkout() {
   const { items, total, clearCart } = useCart();
@@ -55,9 +56,16 @@ export default function Checkout() {
   const [step, setStep] = useState(persisted.step || 1); // 1: details, 2: payment, 3: confirm
   // removed manual errors / touched state (handled by react-hook-form)
   const [payMethod, setPayMethod] = useState(persisted.payMethod || 'mpesa');
-  const [payProcessing, setPayProcessing] = useState(false);
   const [paymentRef, setPaymentRef] = useState('');
+  const mm = useMobileMoneyPayment();
   const orderRef = useState(() => persisted.orderRef || generateOrderRef())[0];
+
+  const [paymentOptions, setPaymentOptions] = useState([]);
+  const [modalOpen, setModalOpen] = useState(false);
+  const [selectedOption, setSelectedOption] = useState(null);
+  const [modalPhone, setModalPhone] = useState(form.phone || '');
+  const [modalAccountRef, setModalAccountRef] = useState('');
+  const [optionsLoading, setOptionsLoading] = useState(false);
 
   function persist(partial) {
     const data = {
@@ -97,11 +105,61 @@ export default function Checkout() {
     push('Details accepted');
   };
 
-  async function simulatePayment() {
-    setPayProcessing(true);
-  const res = await initiatePayment({ method: payMethod, amount: total });
-    setPayProcessing(false);
-    if (res.success) {
+  async function initiateMobileMoneyReal() {
+    if (mm.status === 'initiating' || mm.status === 'pending') return;
+    try {
+      const provider = payMethod === 'mpesa' ? 'MPESA' : 'AIRTEL';
+      const channel = payMethod === 'mpesa' ? 'MPESA_STK_PUSH' : 'AIRTEL_STK_PUSH';
+      const payload = {
+        orderId: orderSnapshot?.backendOrderId || (orderSnapshot?.tempOrderId), // placeholder; real order create could return id
+        provider,
+        channel,
+        method: 'MOBILE_MONEY',
+        amount: Number(total).toFixed(2),
+        phoneNumber: form.phone
+      };
+      // Ensure order exists in backend before payment (create if not already saved)
+      let backendOrderId = orderSnapshot?.backendOrderId;
+      if (!backendOrderId) {
+        const created = await ensureBackendOrder();
+        if (!created) return; // error already surfaced
+        backendOrderId = created.id;
+        payload.orderId = backendOrderId;
+      } else {
+        payload.orderId = backendOrderId;
+      }
+      const initiated = await mm.initiate(payload);
+      setPaymentRef(initiated.externalRequestId || initiated.id);
+    } catch (e) {
+      push(e.message || 'Payment initiation failed', 'error');
+    }
+  }
+
+  async function ensureBackendOrder() {
+    try {
+      const created = await api.orders.create({
+        customerName: form.name,
+        customerPhone: form.phone,
+        items: items.map(i => ({ productId: i.id, quantity: i.qty }))
+      });
+      setOrderSnapshot(os => ({ ...(os||{}), backendOrderId: created.id }));
+      persist({ orderSnapshot: { ...(orderSnapshot||{}), backendOrderId: created.id } });
+      return created;
+    } catch (e) {
+      // Extract probable root cause keywords to show friendlier text
+      const msg = (e.message || '').toLowerCase();
+      let friendly = 'Could not create order.';
+      if (msg.includes('insufficient stock')) friendly = 'Some items are out of stock. Please adjust quantities.';
+      else if (msg.includes('product not found')) friendly = 'One of the products was removed. Refresh and try again.';
+      else if (msg.includes('at least one item')) friendly = 'Your cart is empty.';
+      push(friendly, 'error');
+      return null;
+    }
+  }
+
+  // React to successful payment completion
+  useEffect(() => {
+    if (mm.status === 'succeeded' && !submitted) {
       // snapshot items and total before clearing cart
       // Prices already VAT-inclusive. Extract VAT portion: VAT = total - (total / (1+rate))
       const vatPortion = +(total - (total / (1 + VAT_RATE))).toFixed(2);
@@ -114,28 +172,9 @@ export default function Checkout() {
         ts: Date.now()
       };
       setOrderSnapshot(snapshot);
-      setPaymentRef(res.paymentRef);
       setStep(3);
       setSubmitted(true);
-      persist({ submitted: true, step: 3, paymentRef: res.paymentRef, orderSnapshot: snapshot });
-      // Persist order to backend
-      try {
-        await api.orders.create({
-          customerName: form.name,
-          customerPhone: form.phone,
-          items: items.map(i => ({ productId: i.id, quantity: i.qty }))
-        });
-        // Optimistic stock refresh: trigger a background fetch of products to update stock in localStorage cache
-        try {
-          const latest = await api.products.list();
-          // Store minimal cache for quick UI refresh (could integrate with a global store later)
-          localStorage.setItem('products_cache', JSON.stringify({ ts: Date.now(), items: latest }));
-        } catch (e) {
-          console.warn('Post-order stock refresh failed:', e);
-        }
-      } catch (err) {
-        console.warn('Backend order create failed (continuing with local):', err);
-      }
+      persist({ submitted: true, step: 3, paymentRef, orderSnapshot: snapshot });
       clearCart();
       push('Payment successful');
       // store order history
@@ -144,7 +183,7 @@ export default function Checkout() {
         const list = raw ? JSON.parse(raw) : [];
         list.unshift({
           orderRef,
-            paymentRef: res.paymentRef,
+            paymentRef: paymentRef,
             method: payMethod,
             snapshot,
             customer: { name: form.name, phone: form.phone, delivery: form.delivery, address: form.address },
@@ -152,10 +191,11 @@ export default function Checkout() {
         });
         localStorage.setItem('orders', JSON.stringify(list.slice(0,50)));
       } catch {}
-    } else {
+    }
+    if (mm.status === 'failed') {
       push('Payment failed', 'error');
     }
-  }
+  }, [mm.status]);
 
   function exportSummary() {
     const snap = orderSnapshot || { items, total };
@@ -316,6 +356,66 @@ export default function Checkout() {
     }
   }, [items.length]);
 
+  useEffect(() => {
+    let mounted = true;
+    (async () => {
+      try {
+        setOptionsLoading(true);
+        const opts = await api.payments.options();
+        if (mounted) setPaymentOptions(opts);
+      } catch (e) { /* ignore */ }
+      finally { setOptionsLoading(false); }
+    })();
+    return () => { mounted = false; };
+  }, []);
+
+  function openOption(opt) {
+    setSelectedOption(opt);
+    setModalPhone(form.phone || '');
+    setModalAccountRef('');
+    setModalOpen(true);
+  }
+
+  async function initiateFromOption() {
+    if (!selectedOption) return;
+    try {
+      // Ensure backend order exists
+      let backendOrderId = orderSnapshot?.backendOrderId;
+      if (!backendOrderId) {
+        const created = await ensureBackendOrder();
+        if (!created) return;
+        backendOrderId = created.id;
+      }
+      if (selectedOption.supportsStk) {
+        const payload = {
+          orderId: backendOrderId,
+          provider: selectedOption.provider,
+          channel: selectedOption.channel,
+          method: 'MOBILE_MONEY',
+          amount: Number(total).toFixed(2),
+          phoneNumber: modalPhone,
+          accountReference: modalAccountRef || undefined,
+          supportsStk: true
+        };
+        await mm.initiate(payload);
+      } else {
+        // manual initiation
+        await api.payments.initiateManual({
+          orderId: backendOrderId,
+          paymentOptionId: selectedOption.id,
+          amount: Number(total).toFixed(2),
+          phoneNumber: modalPhone || undefined,
+          accountReference: modalAccountRef || undefined
+        });
+        // start polling using hook's internal poller by seeding orderId
+        mm.initiate({ orderId: backendOrderId, provider: selectedOption.provider, channel: selectedOption.channel, method: 'MOBILE_MONEY', amount: Number(total).toFixed(2), phoneNumber: modalPhone });
+      }
+      setModalOpen(false);
+    } catch (e) {
+      push(e.message || 'Could not start payment', 'error');
+    }
+  }
+
   if (submitted && step === 3) {
     const snap = orderSnapshot || { items: [], total };
     return (
@@ -423,19 +523,33 @@ export default function Checkout() {
           {step === 2 && (
             <div>
               <h2 className="h5 mb-2">Payment</h2>
-              <p className="text-muted small">Simulated mobile money payment – choose a method then click Pay. (No real transaction.)</p>
-              <div className="d-flex gap-3 mb-3 flex-wrap">
-                <div className="form-check">
-                  <input className="form-check-input" type="radio" name="pay" id="payMpesa" value="mpesa" checked={payMethod==='mpesa'} onChange={()=>setPayMethod('mpesa')} />
-                  <label className="form-check-label" htmlFor="payMpesa">M-Pesa</label>
-                </div>
-                <div className="form-check">
-                  <input className="form-check-input" type="radio" name="pay" id="payAirtel" value="airtel" checked={payMethod==='airtel'} onChange={()=>setPayMethod('airtel')} />
-                  <label className="form-check-label" htmlFor="payAirtel">Airtel Money</label>
-                </div>
+              <p className="text-muted small mb-2">Select a payment option below. STK supported methods will trigger a phone prompt; others show instructions.</p>
+              {optionsLoading && <p className="small text-muted">Loading options…</p>}
+              <div className="d-flex flex-wrap gap-2 mb-3">
+                {paymentOptions.map(opt => {
+                  const b = paymentBranding[opt.provider] || { color:'#222', bg:'#eee' };
+                  return (
+                    <button key={opt.id} type="button" onClick={()=>openOption(opt)} className="btn btn-light border position-relative" style={{minWidth:180, textAlign:'left'}}>
+                      <span className="d-flex align-items-center gap-2">
+                        <span style={{width:26,height:26,background:b.color,color:'#fff',borderRadius:6,fontSize:12,fontWeight:600,display:'flex',alignItems:'center',justifyContent:'center'}}>{opt.provider[0]}</span>
+                        <span className="d-flex flex-column">
+                          <strong className="small mb-0" style={{color:b.color}}>{opt.displayName}</strong>
+                          <span className="text-muted small" style={{lineHeight:1.1}}>{opt.shortDescription || opt.channel}</span>
+                        </span>
+                      </span>
+                      {opt.supportsStk && <span className="badge bg-success position-absolute top-0 end-0 m-1" style={{fontSize:'0.6rem'}}>STK</span>}
+                    </button>
+                  );
+                })}
+                {paymentOptions.length===0 && !optionsLoading && (
+                  <div className="alert alert-warning w-100 py-2 small">No payment options configured.</div>
+                )}
               </div>
-              <div className="d-flex gap-2 flex-wrap">
-                <button disabled={payProcessing} onClick={simulatePayment} className="btn btn-success flex-grow-1 flex-sm-grow-0">{payProcessing ? 'Processing…' : `Pay ${formatKES(total)}`}</button>
+              {mm.status==='pending' && <p className="small text-muted mt-2">Awaiting confirmation on your phone…</p>}
+              {mm.status==='timeout' && <p className="small text-danger mt-2">Timed out waiting for confirmation. Try again.</p>}
+              {mm.error && <p className="small text-danger mt-2">{mm.error}</p>}
+              {/* Reconciliation moved inside modal for manual (non-STK) flows */}
+              <div className="d-flex gap-2 flex-wrap mt-3">
                 <button type="button" className="btn btn-outline-secondary flex-grow-1 flex-sm-grow-0" onClick={()=>setStep(1)}>Back</button>
               </div>
             </div>
@@ -457,6 +571,30 @@ export default function Checkout() {
           </div>
         </div>
       </div>
+      <PaymentOptionModal
+        option={selectedOption}
+        open={modalOpen}
+        onClose={()=>setModalOpen(false)}
+        onInitiate={initiateFromOption}
+        onReconcile={async (phone, amountVal)=>{
+          if (!selectedOption) return;
+          const backendOrderId = orderSnapshot?.backendOrderId;
+          if (!backendOrderId) { push('Create order first by starting payment', 'error'); return; }
+          try {
+            await mm.reconcile({ orderId: backendOrderId, provider: selectedOption.provider, phoneNumber: phone || undefined, amount: amountVal ? Number(amountVal) : undefined });
+          } catch {/* handled in hook */}
+        }}
+        reconciling={mm.status==='reconciling'}
+        paymentStatus={mm.payment?.status}
+        loading={mm.status==='initiating' || mm.status==='pending'}
+        paymentHookStatus={mm.status}
+        phone={modalPhone}
+        setPhone={setModalPhone}
+        accountRef={modalAccountRef}
+        setAccountRef={setModalAccountRef}
+        amount={Number(total).toFixed(2)}
+      />
     </section>
   );
 }
+// ReconcileForm removed; functionality moved into PaymentOptionModal

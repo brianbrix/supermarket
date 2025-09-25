@@ -166,3 +166,57 @@ The home page now uses debounced queries for text (500ms) and range/stock/catego
 
 ---
 Feel free to adapt and extend. Karibu! 🇰🇪
+
+## Payments & Mobile Money Configuration
+
+The backend now models payments with a flexible `Payment` entity plus configurable `PaymentOption` records an admin can manage. These options drive the checkout experience for mobile money automation.
+
+### Core Concepts
+- STK Push is treated as a capability (flag) layered on top of base channels rather than a distinct channel to configure.
+- Supported providers: `MPESA`, `AIRTEL`.
+- Supported configurable channels (after recent simplification):
+  - `MPESA_PAYBILL`
+  - `MPESA_TILL`
+  - `MPESA_P2P` (manual peer transfer – user sends to a phone number; no automated push)
+  - `MPESA_POCHI`
+  - `AIRTEL_COLLECTION`
+- Legacy shortcut channels (`MPESA_STK_PUSH`, `AIRTEL_STK_PUSH`) are still present in the enum for backward compatibility but should NOT be added as new options; prefer a base channel with `supportsStk = true`.
+- Removed: manual "send money" convenience channels (`MPESA_SEND_MONEY`, `AIRTEL_SEND_MONEY`). These flows are now considered part of the broader Cash On Delivery (COD) operational process instead of a separate configurable payment option.
+
+### STK Capability (`supportsStk`)
+Set `supportsStk=true` on a base channel when you want the backend to initiate an automated push (e.g. M-Pesa STK) instead of requiring the customer to key in a PayBill/Till manually. Applicable channels:
+`MPESA_PAYBILL`, `MPESA_TILL`, `AIRTEL_COLLECTION` (and legacy `*_STK_PUSH` if still in existing data).
+
+### Required Fields by Channel
+| Channel | Required Fields | Notes |
+|---------|-----------------|-------|
+| MPESA_PAYBILL | paybillNumber, (auto accountReferenceTemplate defaults to `ORDER-{orderId}` if blank) | May set `supportsStk=true` for automatic push |
+| MPESA_TILL | tillNumber, (auto accountReferenceTemplate defaults if provided blank) | May set `supportsStk=true` |
+| MPESA_P2P | recipientPhone | Manual send instructions only (no STK) |
+| MPESA_POCHI | recipientPhone | Manual send |
+| AIRTEL_COLLECTION | (none mandatory) | May set `supportsStk=true` |
+
+Fields on a `PaymentOption`:
+- `displayName` – UI label (e.g. "M-Pesa PayBill (Auto)").
+- `shortDescription` – concise badge/summary text.
+- `instructionsMarkdown` – multi-step guidance; supports Markdown (lists, bold, etc.). Provide manual steps when `supportsStk=false`.
+- `paybillNumber` / `tillNumber` / `recipientPhone` – channel specific identifiers.
+- `accountReferenceTemplate` – tokens: `{orderId}`, `{userId}`, `{total}`; resolved at initiation for structured statements.
+- `supportsStk` – enable automated STK push on eligible channels.
+- `sortOrder` – integer for display sorting.
+- `active` – whether exposed to checkout consumers.
+- `metadataJson` – arbitrary JSON string for future extensions (branding hints, regional tags, etc.).
+
+### Admin Management
+`/admin/payment-options` UI lets an authorized admin create/update/delete options. The channel selector excludes removed send money types and legacy `*_STK_PUSH` shortcuts.
+
+### Checkout Behavior
+- Frontend fetches active options and renders them with provider branding.
+- If `supportsStk=true`, initiation hits the automated push path (backend sets external request id & waits for callback / simulated flow).
+- If `supportsStk=false`, the instructions are shown and the payment record remains `INITIATED` until reconciled by callback/manual process.
+
+### Migration Notes
+If you had data rows using `MPESA_SEND_MONEY` or `AIRTEL_SEND_MONEY`, they should be retired. Keep historical Payments intact (enum constants removed from code; existing DB rows may need data migration to COD notes or archived). Consider running a DB update to map those historic rows to `method=CASH_ON_DELIVERY` with an audit note if necessary.
+
+## Documentation Change Log
+- 2025-09-25: Removed configurable send money channels; clarified STK capability and updated required field matrix.

@@ -4,7 +4,7 @@ import FilterBar from '../../components/FilterBar.jsx';
 
 export default function AdminCategories(){
   const [items, setItems] = useState([]);
-  const [pageMeta, setPageMeta] = useState({ page:0, size:20, totalPages:0, totalElements:0, first:true, last:true });
+  const [pageMeta, setPageMeta] = useState({ page:0, size:10, totalPages:0, totalElements:0, first:true, last:true });
   const [page, setPage] = useState(0);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(null);
