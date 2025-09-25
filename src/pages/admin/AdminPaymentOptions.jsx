@@ -19,7 +19,7 @@ export default function AdminPaymentOptions(){
   const [saving,setSaving] = useState(false);
   const [pageMeta,setPageMeta] = useState({ page:0, size:20, totalElements:0, totalPages:0, first:true, last:true });
   const [page,setPage] = useState(0);
-  const size = 20;
+  const [size, setSize] = useState(20);
   const dialogRef = useRef(null);
 
   function baseForm(){
@@ -44,7 +44,7 @@ export default function AdminPaymentOptions(){
   async function load(){
     setLoading(true);
     try {
-      const data = await api.admin.payments.options.list(page, size);
+  const data = await api.admin.payments.options.list(page, size);
       if (Array.isArray(data)) {
         setOptions(data);
         setPageMeta(pm=>({ ...pm, page, size, totalElements:data.length, totalPages:1, first:true, last:true }));
@@ -127,7 +127,7 @@ export default function AdminPaymentOptions(){
               })}
             </tbody>
           </table>
-          <PaginationBar {...pageMeta} onPageChange={setPage} alwaysVisible />
+          <PaginationBar {...pageMeta} size={size} onPageChange={setPage} alwaysVisible sizes={[10,20,50,100]} onPageSizeChange={(newSize)=>{ setSize(newSize); setPage(0); }} />
         </div>
       )}
 

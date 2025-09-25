@@ -7,7 +7,7 @@ export default function AdminProducts() {
   const [products, setProducts] = useState([]);
   const [pageMeta, setPageMeta] = useState({ page:0, size:10, totalElements:0, totalPages:0, first:true, last:true });
   const [page, setPage] = useState(0);
-  const size = 20;
+  const [size, setSize] = useState(20);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(null);
   const [form, setForm] = useState({ name:'', categoryId:'', price:'', description:'', stock:0, unit:'' });
@@ -36,7 +36,7 @@ export default function AdminProducts() {
       ...(inStock ? { inStock: inStock === 'true' } : {}),
       sort, direction
     };
-    api.admin.products.list(page, size, payload)
+  api.admin.products.list(page, size, payload)
       .then(pageResp => {
         const content = (pageResp.content || pageResp).map(mapProductResponse);
         setProducts(content);
@@ -238,7 +238,7 @@ export default function AdminProducts() {
                   ))}
                 </tbody>
               </table>
-              <PaginationBar {...pageMeta} onPageChange={setPage} alwaysVisible />
+              <PaginationBar {...pageMeta} size={size} onPageChange={setPage} alwaysVisible sizes={[10,20,50,100]} onPageSizeChange={(newSize)=>{ setSize(newSize); setPage(0); }} />
             </div>
           )}
         </div>

@@ -12,7 +12,7 @@ export default function AdminOrders() {
   const [orders, setOrders] = useState([]);
   const [pageMeta, setPageMeta] = useState({ page:0, size:10, totalElements:0, totalPages:0, first:true, last:true });
   const [page, setPage] = useState(0);
-  const size = 20;
+  const [size, setSize] = useState(20);
   const [draftFilters, setDraftFilters] = useState({ q:'', status:'', from:'', to:'', minTotal:'', maxTotal:'', sort:'createdAt', direction:'desc' });
   const [appliedFilters, setAppliedFilters] = useState({ q:'', status:'', from:'', to:'', minTotal:'', maxTotal:'', sort:'createdAt', direction:'desc' });
   const debounceRef = useRef();
@@ -36,7 +36,7 @@ export default function AdminOrders() {
       ...(maxTotal ? { maxTotal } : {}),
       sort, direction
     };
-    api.admin.orders.list(page, size, filterPayload)
+  api.admin.orders.list(page, size, filterPayload)
       .then(resp => { 
         // Expecting PageResponse shape { content, page, size, ... }
         if (Array.isArray(resp)) {
@@ -150,7 +150,7 @@ export default function AdminOrders() {
               ))}
             </tbody>
           </table>
-          <PaginationBar {...pageMeta} onPageChange={setPage} alwaysVisible />
+          <PaginationBar {...pageMeta} size={size} onPageChange={setPage} alwaysVisible sizes={[10,20,50,100]} onPageSizeChange={(newSize)=>{ setSize(newSize); setPage(0); }} />
         </div>
       )}
       <OrderDetailModal order={selectedOrder} onClose={()=>setSelectedOrder(null)} />

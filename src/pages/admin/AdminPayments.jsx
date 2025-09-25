@@ -9,9 +9,9 @@ export default function AdminPayments() {
   const [payments, setPayments] = useState([]);
   const [pageMeta, setPageMeta] = useState({ page:0, size:10, totalElements:0, totalPages:0, first:true, last:true });
   const [page, setPage] = useState(0);
+  const [size, setSize] = useState(20);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(null);
-  const size = 20;
   const [draftFilters, setDraftFilters] = useState({ q:'', status:'', method:'', from:'', to:'', minAmount:'', maxAmount:'', sort:'createdAt', direction:'desc' });
   const [appliedFilters, setAppliedFilters] = useState({ q:'', status:'', method:'', from:'', to:'', minAmount:'', maxAmount:'', sort:'createdAt', direction:'desc' });
   const debounceRef = useRef();
@@ -31,7 +31,7 @@ export default function AdminPayments() {
       ...(maxAmount?{maxAmount}:{}),
       sort, direction
     };
-    api.admin.payments.list(page,size,payload)
+  api.admin.payments.list(page,size,payload)
       .then(resp => { setPayments(resp.content || resp); setPageMeta(resp); setLoading(false); })
       .catch(e => { setError(e.message); setLoading(false); });
   }
@@ -120,7 +120,7 @@ export default function AdminPayments() {
               ))}
             </tbody>
           </table>
-          <PaginationBar {...pageMeta} onPageChange={setPage} alwaysVisible />
+          <PaginationBar {...pageMeta} size={size} onPageChange={setPage} alwaysVisible sizes={[10,20,50,100]} onPageSizeChange={(newSize)=>{ setSize(newSize); setPage(0); }} />
         </div>
       )}
     </div>
