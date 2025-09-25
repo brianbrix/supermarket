@@ -1,0 +1,50 @@
+/* Admin dashboard enhanced styles */
+
+/* Simplified neutral + subtle semantic accents */
+.admin-metric-card {
+  border: 1px solid var(--bs-border-color,#e3e6ea);
+  background: var(--bs-body-bg);
+  transition: background-color .2s ease,border-color .2s ease;
+}
+.admin-metric-card:hover { border-color: var(--bs-secondary-border-subtle,#c8ccd1); background: var(--bs-tertiary-bg,#f8f9fa); }
+.admin-metric-card .metric-title { font-size:.6rem; letter-spacing:.05em; text-transform:uppercase; font-weight:600; opacity:.75; }
+.admin-metric-card .metric-value { font-size:1.05rem; font-weight:600; font-variant-numeric:tabular-nums; }
+.admin-metric-accent-success { border-left:4px solid #198754; }
+.admin-metric-accent-danger { border-left:4px solid #dc3545; }
+.admin-metric-accent-warning { border-left:4px solid #ffc107; }
+.admin-metric-accent-info { border-left:4px solid #0d6efd; }
+
+
+/* Status badges (orders & payments) */
+.status-badge { padding: .35rem .55rem; border-radius: 2rem; font-size: .625rem; font-weight: 600; letter-spacing:.5px; display:inline-flex; align-items:center; gap:.25rem; line-height:1; }
+.status-pending { background: #f8f9fa; color:#6c757d; border:1px solid #ced4da; }
+.status-processing { background:#e7f1ff; color:#0d6efd; }
+.status-shipped { background:#e6f9fd; color:#087990; }
+.status-delivered { background:#e9f7f1; color:#146c43; }
+.status-completed { background:#e9f7f1; color:#146c43; }
+.status-cancelled { background:#fff7e0; color:#8a6d00; }
+.status-refunded { background:#fdecef; color:#b02a37; }
+.status-failed { background:#fdecef; color:#b02a37; }
+
+/* Apply status color ring to select wrapper */
+.status-select { min-width:120px; }
+.status-select.pending select { border-color:#ced4da; }
+.status-select.processing select { border-color:#0d6efd; }
+.status-select.shipped select { border-color:#087990; }
+.status-select.delivered select, .status-select.completed select { border-color:#198754; }
+.status-select.cancelled select { border-color:#ffc107; }
+.status-select.refunded select, .status-select.failed select { border-color:#dc3545; }
+
+/* Payments table amount emphasis */
+.amount-cell { font-variant-numeric: tabular-nums; }
+
+/* Table row hover subtle */
+table.table tbody tr:hover { background: rgba(0,123,255,0.04); }
+
+/* InfoTooltip component */
+.info-tooltip button { background: #f8f9fa; border:1px solid #ced4da; color:#495057; }
+.info-tooltip button:hover, .info-tooltip button:focus { background:#e9ecef; outline:none; }
+.info-tooltip-popup { max-width:340px; width:max-content; font-size:.65rem; line-height:1.25; box-shadow:0 4px 16px -4px rgba(0,0,0,.25); border:1px solid rgba(255,255,255,0.08); }
+.info-tooltip-popup.fade-in { animation: infoTooltipFade .12s ease; }
+@keyframes infoTooltipFade { from { opacity:0; transform: translate(-50%,-4px);} to { opacity:1; transform: translate(-50%,0);} }
+

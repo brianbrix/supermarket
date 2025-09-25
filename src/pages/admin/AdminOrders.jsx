@@ -3,6 +3,8 @@ import { api } from '../../services/api.js';
 import FilterBar from '../../components/FilterBar.jsx';
 import PaginationBar from '../../components/PaginationBar.jsx';
 import OrderDetailModal from '../../components/admin/OrderDetailModal.jsx';
+import StatusBadge from '../../components/StatusBadge.jsx';
+import '../../App.admin.css';
 
 const STATUSES = ['PENDING','PROCESSING','SHIPPED','DELIVERED','CANCELLED','REFUNDED'];
 
@@ -14,6 +16,10 @@ export default function AdminOrders() {
   const [draftFilters, setDraftFilters] = useState({ q:'', status:'', from:'', to:'', minTotal:'', maxTotal:'', sort:'createdAt', direction:'desc' });
   const [appliedFilters, setAppliedFilters] = useState({ q:'', status:'', from:'', to:'', minTotal:'', maxTotal:'', sort:'createdAt', direction:'desc' });
   const debounceRef = useRef();
+  // Guard against React StrictMode double-invoking effects so we don't double load
+  const didInitialLoadRef = useRef(false);
+  // Skip first debounce run (initial draft == applied)
+  const firstDebounceRef = useRef(true);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(null);
   const [selectedOrder, setSelectedOrder] = useState(null);
@@ -45,10 +51,19 @@ export default function AdminOrders() {
       })
       .catch(e => { setError(e.message); setLoading(false); });
   }
-  useEffect(() => { load(); }, [page]);
+  // Load when page OR applied filters change (filters debounced below)
+  useEffect(() => {
+    if (!didInitialLoadRef.current) {
+      didInitialLoadRef.current = true;
+      load();
+      return;
+    }
+    load();
+  }, [page, appliedFilters]);
 
   // Debounced filters for expensive queries
   useEffect(()=>{
+    if (firstDebounceRef.current) { firstDebounceRef.current = false; return; }
     clearTimeout(debounceRef.current);
     debounceRef.current = setTimeout(()=>{ setAppliedFilters(d=>({ ...d, ...draftFilters })); setPage(0); }, 400);
     return ()=> clearTimeout(debounceRef.current);
@@ -123,10 +138,13 @@ export default function AdminOrders() {
                   <td>{o.customerName || '—'}</td>
                   <td>{(o.items || []).reduce((s,i)=>s + (i.quantity || 0),0)}</td>
                   <td>{o.totalGross != null ? `KES ${Number(o.totalGross).toFixed(2)}` : '—'}</td>
-                  <td>
-                    <select className="form-select form-select-sm" value={o.status} onChange={e=>changeStatus(o.id, e.target.value)}>
-                      {STATUSES.map(s => <option key={s} value={s}>{s}</option>)}
-                    </select>
+                  <td style={{minWidth:'140px'}}>
+                    <div className={`d-flex flex-column gap-1 status-select ${o.status?.toLowerCase()}`}> 
+                      <StatusBadge status={o.status} />
+                      <select className="form-select form-select-sm" value={o.status} onChange={e=>changeStatus(o.id, e.target.value)}>
+                        {STATUSES.map(s => <option key={s} value={s}>{s}</option>)}
+                      </select>
+                    </div>
                   </td>
                 </tr>
               ))}

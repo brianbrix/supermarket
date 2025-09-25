@@ -2,6 +2,8 @@ import { useEffect, useState, useRef } from 'react';
 import { api } from '../../services/api.js';
 import FilterBar from '../../components/FilterBar.jsx';
 import PaginationBar from '../../components/PaginationBar.jsx';
+import StatusBadge from '../../components/StatusBadge.jsx';
+import '../../App.admin.css';
 
 export default function AdminPayments() {
   const [payments, setPayments] = useState([]);
@@ -111,7 +113,7 @@ export default function AdminPayments() {
                   <td>{p.id}</td>
                   <td>{p.orderId}</td>
                   <td>{p.amount}</td>
-                  <td><span className="badge text-bg-secondary">{p.status || 'PAID'}</span></td>
+                  <td><StatusBadge status={p.status || 'PAID'} /></td>
                   <td>{p.method || 'MOBILE'}</td>
                   <td>{p.createdAt ? new Date(p.createdAt).toLocaleString() : '—'}</td>
                 </tr>

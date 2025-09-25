@@ -1,5 +1,7 @@
 import { useEffect, useState, useMemo } from 'react';
+import '../../App.admin.css';
 import { api } from '../../services/api.js';
+import InfoTooltip from '../../components/InfoTooltip.jsx';
 
 export default function AdminAnalytics(){
   const [stats, setStats] = useState(null);
@@ -7,10 +9,20 @@ export default function AdminAnalytics(){
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(null);
   const [trendMode, setTrendMode] = useState('daily'); // 'daily' | 'weekly' | 'monthly'
-  const [aovData, setAovData] = useState(null);
-  const [aovGranularity, setAovGranularity] = useState('DAILY');
-  const [aovLoading, setAovLoading] = useState(false);
-  const [aovError, setAovError] = useState(null);
+  // Unified analytics
+  const [unified, setUnified] = useState(null);
+  const [uLoading, setULoading] = useState(false);
+  const [uError, setUError] = useState(null);
+  const [granularity, setGranularity] = useState('DAILY');
+  const [range, setRange] = useState(()=>{
+    const to = new Date();
+    const from = new Date();
+    from.setDate(from.getDate()-29); // default 30 days
+    return { from: from.toISOString(), to: to.toISOString() };
+  });
+  const [statuses, setStatuses] = useState(['PENDING','PROCESSING','SHIPPED','DELIVERED']);
+  const [includeRefunded, setIncludeRefunded] = useState(false);
+  const [includeCancelled, setIncludeCancelled] = useState(false);
 
   useEffect(()=>{
     let active = true;
@@ -24,14 +36,21 @@ export default function AdminAnalytics(){
     return ()=>{ active = false; };
   },[]);
 
+  // Unified fetch
   useEffect(()=>{
     let active = true;
-    setAovLoading(true); setAovError(null);
-    api.admin.analytics.aov({ granularity: aovGranularity })
-      .then(data => { if(!active) return; setAovData(data); setAovLoading(false); })
-      .catch(e => { if(!active) return; setAovError(e.message); setAovLoading(false); });
+    setULoading(true); setUError(null);
+    api.admin.analytics.unified({
+      from: range.from,
+      to: range.to,
+      granularity,
+      statuses,
+      includeRefunded,
+      includeCancelled
+    }).then(data => { if(!active) return; setUnified(data); setULoading(false); })
+      .catch(e => { if(!active) return; setUError(e.message); setULoading(false); });
     return ()=>{ active = false; };
-  }, [aovGranularity]);
+  }, [range.from, range.to, granularity, statuses, includeRefunded, includeCancelled]);
 
   return (
     <div className="container py-4">
@@ -43,19 +62,21 @@ export default function AdminAnalytics(){
       {error && <div className="alert alert-danger">{error}</div>}
       {stats && (
         <div className="row g-3 mb-4">
-          <AnalyticCard title="Total Orders" value={stats.totalOrders} />
-          <AnalyticCard title="Revenue" value={`KES ${Number(stats.totalRevenue||0).toFixed(2)}`} />
-          <AnalyticCard title="Products" value={stats.totalProducts} />
-            <AnalyticCard title="Admins" value={stats.totalAdmins} />
-            <AnalyticCard title="Pending" value={stats.pendingOrders} />
-            <AnalyticCard title="Processing" value={stats.processingOrders} />
-            <AnalyticCard title="Completed" value={stats.completedOrders} />
+          <AnalyticCard title="Total Orders" value={stats.totalOrders} accent="info" />
+          <AnalyticCard title="Revenue" value={`KES ${Number(stats.totalRevenue||0).toFixed(2)}`} accent="success" />
+          <AnalyticCard title="Products" value={stats.totalProducts} accent="warning" />
+          <AnalyticCard title="Admins" value={stats.totalAdmins} accent="danger" />
+          <AnalyticCard title="Pending" value={stats.pendingOrders} accent="info" />
+          <AnalyticCard title="Processing" value={stats.processingOrders} accent="primary" />
+          <AnalyticCard title="Completed" value={stats.completedOrders} accent="success" />
         </div>
       )}
       {extended && (
         <>
           <section className="mb-5">
-            <h2 className="h6 mb-3">Low Stock (≤ threshold)</h2>
+            <h2 className="h6 mb-3 d-flex align-items-center gap-2">Low Stock (≤ threshold)
+              <InfoTooltip text="Products with stock at or below the configured threshold (default 5). Helps identify items to restock." />
+            </h2>
             {extended.lowStock.length === 0 ? <p className="text-muted small mb-0">No low stock products.</p> : (
               <div className="table-responsive small">
                 <table className="table table-sm mb-0 align-middle">
@@ -68,7 +89,9 @@ export default function AdminAnalytics(){
             )}
           </section>
           <section className="mb-5">
-            <h2 className="h6 mb-3">Top Selling Products</h2>
+            <h2 className="h6 mb-3 d-flex align-items-center gap-2">Top Selling Products
+              <InfoTooltip text="Ranked by quantity sold in the current lookback window (default 30 days). Top 10 displayed." />
+            </h2>
             {extended.topSelling.length === 0 ? <p className="text-muted small mb-0">No sales yet.</p> : (
               <div className="table-responsive small">
                 <table className="table table-sm mb-0 align-middle">
@@ -82,12 +105,28 @@ export default function AdminAnalytics(){
           </section>
           <RevenueTrendSection trendMode={trendMode} setTrendMode={setTrendMode} analytics={extended} />
           <section className="mb-5">
-            <h2 className="h6 mb-3">Order Status Funnel (Snapshot)</h2>
+            <h2 className="h6 mb-3 d-flex align-items-center gap-2">Order Status Funnel (Snapshot)
+              <InfoTooltip text="Current counts of orders by status. Operational WIP snapshot, not a sequential conversion metric yet." />
+            </h2>
             <StatusFunnel stats={stats} />
           </section>
         </>
       )}
-      <AovSection data={aovData} loading={aovLoading} error={aovError} granularity={aovGranularity} onGranularityChange={setAovGranularity} />
+      <UnifiedSection
+        unified={unified}
+        loading={uLoading}
+        error={uError}
+        granularity={granularity}
+        onGranularityChange={setGranularity}
+        range={range}
+        setRange={setRange}
+        statuses={statuses}
+        setStatuses={setStatuses}
+        includeRefunded={includeRefunded}
+        setIncludeRefunded={setIncludeRefunded}
+        includeCancelled={includeCancelled}
+        setIncludeCancelled={setIncludeCancelled}
+      />
       <section className="mb-5">
         <h2 className="h6 mb-3">Coming Soon</h2>
         <ul className="small text-muted mb-0">
@@ -101,13 +140,29 @@ export default function AdminAnalytics(){
   );
 }
 
-function AnalyticCard({ title, value }) {
+// Human-readable tooltip explanations for each metric.
+const METRIC_EXPLANATIONS = {
+  'Total Orders': 'Count of all orders ever created (any status). Includes cancelled / refunded for historical completeness.',
+  'Revenue': 'Sum of gross order totals (sum of item price * quantity) for all non-cancelled orders. Refunded handling depends on backend implementation.',
+  'Products': 'Total number of distinct active products in the catalog (may exclude soft-deleted items if backend filters them).',
+  'Admins': 'Number of users with administrative privileges (role-based count).',
+  'Pending': 'Orders created but not yet picked/processed. status = PENDING.',
+  'Processing': 'Orders currently being prepared / picked / packed. status = PROCESSING.',
+  'Completed': 'Orders reaching a terminal success state (e.g. DELIVERED). Uses provided completedOrders count.'
+};
+
+function AnalyticCard({ title, value, accent }) {
+  const accentClass = accent ? `admin-metric-accent-${accent}` : '';
+  const tip = METRIC_EXPLANATIONS[title];
   return (
     <div className="col-6 col-md-4 col-lg-3">
-      <div className="card h-100 shadow-sm">
+      <div className={`admin-metric-card card h-100 shadow-sm ${accentClass}`} aria-label={tip || title}>
         <div className="card-body d-flex flex-column justify-content-center text-center py-3">
-          <div className="small text-muted mb-1">{title}</div>
-          <div className="fw-semibold" style={{fontSize:'1.05rem'}}>{value}</div>
+          <div className="metric-title text-muted mb-1 d-flex justify-content-center align-items-center gap-1">
+            <span>{title}</span>
+            {tip && <InfoTooltip text={tip} />}
+          </div>
+          <div className="metric-value">{value}</div>
         </div>
       </div>
     </div>
@@ -164,10 +219,11 @@ function RevenueTrendSection({ trendMode, setTrendMode, analytics }) {
     <span className={`badge ms-2 ${pct > 0 ? 'text-bg-success':'text-bg-danger'}`}>{pct > 0 ? '+' : ''}{pct.toFixed(1)}%</span>
   );
 
+  const trendTooltip = 'Revenue buckets: Sum of gross order totals grouped by the selected granularity. Change % compares the latest complete bucket to the previous one.';
   return (
-    <section className="mb-5">
+    <section className="mb-5" aria-label={trendTooltip}>
       <div className="d-flex align-items-center justify-content-between mb-2 flex-wrap gap-2">
-        <h2 className="h6 m-0">Revenue Trend ({trendMode.charAt(0).toUpperCase()+trendMode.slice(1)}) {pctBadge}</h2>
+        <h2 className="h6 m-0 d-flex align-items-center gap-2">Revenue Trend ({trendMode.charAt(0).toUpperCase()+trendMode.slice(1)}) {pctBadge}<InfoTooltip text={trendTooltip} /></h2>
         <div className="btn-group btn-group-sm" role="group" aria-label="Trend granularity">
           <button type="button" className={`btn btn-${trendMode==='daily'?'primary':'outline-primary'}`} onClick={()=>setTrendMode('daily')}>Daily</button>
           <button type="button" className={`btn btn-${trendMode==='weekly'?'primary':'outline-primary'}`} onClick={()=>setTrendMode('weekly')}>Weekly</button>
@@ -222,33 +278,72 @@ function StatusFunnel({ stats }) {
   );
 }
 
-function AovSection({ data, loading, error, granularity, onGranularityChange }) {
+function UnifiedSection({ unified, loading, error, granularity, onGranularityChange, range, setRange, statuses, setStatuses, includeRefunded, setIncludeRefunded, includeCancelled, setIncludeCancelled }) {
+  const tip = 'Unified analytics: buckets with gross revenue, order counts, derived AOV, and overall aggregates. Filters: statuses, refunded/cancelled inclusion, date range.';
+  const buckets = unified?.buckets || [];
+  const current = buckets[buckets.length-1];
+  const previous = buckets[buckets.length-2];
+  const percentChange = current && previous && previous.aov && previous.aov !== 0 ? ((Number(current.aov) - Number(previous.aov)) / Number(previous.aov))*100 : null;
+  const totalOrders = unified?.aggregates?.totalOrders || 0;
+  const totalGross = Number(unified?.aggregates?.totalGross || 0);
+  const overallAov = unified?.aggregates?.overallAov || 0;
+
+  function onDateRangeChange(days){
+    const to = new Date();
+    const from = new Date();
+    from.setDate(from.getDate()-(days-1));
+    setRange({ from: from.toISOString(), to: to.toISOString() });
+  }
+
+  const statusOptions = ['PENDING','PROCESSING','SHIPPED','DELIVERED'];
+  function toggleStatus(s){
+    setStatuses(prev => prev.includes(s) ? prev.filter(x=>x!==s) : [...prev, s]);
+  }
+
+  const subtitle = `Range: ${range.from.slice(0,10)} → ${range.to.slice(0,10)} (Statuses: ${statuses.join(', ')}${includeRefunded?', REFUNDED':''}${includeCancelled?', CANCELLED':''})`;
+
   return (
-    <section className="mb-5">
-      <div className="d-flex align-items-center justify-content-between mb-2 flex-wrap gap-2">
-        <h2 className="h6 m-0">Average Order Value ({granularity}) {data && data.percentChange != null && (
-          <span className={`badge ms-2 ${data.percentChange > 0 ? 'text-bg-success':'text-bg-danger'}`}>{data.percentChange > 0 ? '+' : ''}{Number(data.percentChange).toFixed(2)}%</span>
-        )}</h2>
-        <div className="btn-group btn-group-sm" role="group" aria-label="AOV granularity">
-          {['DAILY','WEEKLY','MONTHLY'].map(g => (
-            <button key={g} type="button" className={`btn btn-${granularity===g?'primary':'outline-primary'}`} onClick={()=>onGranularityChange(g)}>{g.charAt(0)+g.slice(1).toLowerCase()}</button>
-          ))}
+    <section className="mb-5" aria-label={tip}>
+      <div className="d-flex flex-column flex-lg-row justify-content-between gap-2 mb-2">
+        <div>
+          <h2 className="h6 m-0 d-flex align-items-center gap-2">Unified Analytics ({granularity}) {percentChange!=null && (
+            <span className={`badge ms-2 ${percentChange>0?'text-bg-success':'text-bg-danger'}`}>{percentChange>0?'+':''}{percentChange.toFixed(2)}%</span>
+          )}<InfoTooltip text={tip} /></h2>
+          <div className="small text-muted mt-1">{subtitle}</div>
+        </div>
+        <div className="d-flex flex-wrap gap-2 align-items-center">
+          <div className="btn-group btn-group-sm" role="group" aria-label="Granularity">
+            {['DAILY','WEEKLY','MONTHLY'].map(g => <button key={g} type="button" className={`btn btn-${granularity===g?'primary':'outline-primary'}`} onClick={()=>onGranularityChange(g)}>{g.charAt(0)+g.slice(1).toLowerCase()}</button>)}
+          </div>
+          <div className="btn-group btn-group-sm" role="group" aria-label="Range">
+            {[7,14,30,60].map(d => <button key={d} type="button" className={`btn btn-${(new Date(range.from).getDate()=== (new Date().getDate()-(d-1)) && ( (new Date().getTime()-new Date(range.from).getTime())/86400000+1)===d )?'primary':'outline-primary'}`} onClick={()=>onDateRangeChange(d)}>{d}d</button>)}
+          </div>
+        </div>
+      </div>
+      <div className="d-flex flex-wrap gap-2 mb-3 align-items-center">
+        {statusOptions.map(s => (
+          <button key={s} type="button" className={`btn btn-sm ${statuses.includes(s)?'btn-secondary':'btn-outline-secondary'}`} onClick={()=>toggleStatus(s)}>{s}</button>
+        ))}
+        <div className="form-check form-check-inline small">
+          <input className="form-check-input" type="checkbox" id="incRefunded" checked={includeRefunded} onChange={e=>setIncludeRefunded(e.target.checked)} />
+          <label className="form-check-label" htmlFor="incRefunded">Refunded</label>
+        </div>
+        <div className="form-check form-check-inline small">
+          <input className="form-check-input" type="checkbox" id="incCancelled" checked={includeCancelled} onChange={e=>setIncludeCancelled(e.target.checked)} />
+          <label className="form-check-label" htmlFor="incCancelled">Cancelled</label>
         </div>
       </div>
       {loading && <ChartSkeleton />}
       {error && <div className="alert alert-danger small mb-0">{error}</div>}
-      {data && !loading && !error && (
-        data.series.length === 0 ? <p className="text-muted small mb-0">No orders yet.</p> : (
-          <AovMiniChart points={data.series} granularity={granularity} />
-        )
-      )}
-      {data && !loading && !error && (
+      {buckets.length === 0 && !loading && !error && <p className="text-muted small mb-0">No orders in range.</p>}
+      {buckets.length>0 && !loading && !error && <AovMiniChart points={buckets.map(b=>({ start:b.start, end:b.end, aov:b.aov, orderCount:b.orderCount, grossTotal:b.gross }))} granularity={granularity} />}
+      {unified && !loading && !error && (
         <div className="row row-cols-2 row-cols-sm-5 g-2 mt-3 small">
-          <div className="col"><div className="p-2 bg-body-tertiary rounded">Current AOV<br/><strong>KES {Number(data.currentAov||0).toFixed(2)}</strong></div></div>
-          <div className="col"><div className="p-2 bg-body-tertiary rounded">Previous AOV<br/><strong>KES {Number(data.previousAov||0).toFixed(2)}</strong></div></div>
-          <div className="col"><div className="p-2 bg-body-tertiary rounded">Buckets<br/><strong>{data.series.length}</strong></div></div>
-          <div className="col"><div className="p-2 bg-body-tertiary rounded">Orders (Total)<br/><strong>{data.series.reduce((s,p)=>s+p.orderCount,0)}</strong></div></div>
-          <div className="col"><div className="p-2 bg-body-tertiary rounded">Gross (Sum)<br/><strong>KES {data.series.reduce((s,p)=>s+Number(p.grossTotal||0),0).toFixed(2)}</strong></div></div>
+          <div className="col"><div className="p-2 bg-body-tertiary rounded">Current AOV<br/><strong>KES {current?Number(current.aov||0).toFixed(2):'0.00'}</strong></div></div>
+          <div className="col"><div className="p-2 bg-body-tertiary rounded">Previous AOV<br/><strong>KES {previous?Number(previous.aov||0).toFixed(2):'0.00'}</strong></div></div>
+          <div className="col"><div className="p-2 bg-body-tertiary rounded">Buckets<br/><strong>{buckets.length}</strong></div></div>
+          <div className="col"><div className="p-2 bg-body-tertiary rounded">Orders (Total)<br/><strong>{totalOrders}</strong></div></div>
+          <div className="col"><div className="p-2 bg-body-tertiary rounded">Gross (Sum)<br/><strong>KES {totalGross.toFixed(2)}</strong></div></div>
         </div>
       )}
     </section>
@@ -256,6 +351,7 @@ function AovSection({ data, loading, error, granularity, onGranularityChange }) 
 }
 
 function AovMiniChart({ points, granularity, height=160 }) {
+  const [hoverIndex, setHoverIndex] = useState(null);
   const max = Math.max(...points.map(p => Number(p.aov)), 1);
   return (
     <div className="position-relative">
@@ -264,10 +360,21 @@ function AovMiniChart({ points, granularity, height=160 }) {
           const val = Number(p.aov);
           const h = (val/max)*(height-40);
           const label = granularity === 'DAILY' ? p.start.slice(5,10) : granularity === 'WEEKLY' ? p.start.slice(5,10) : p.start.slice(0,7);
+          const gross = Number(p.grossTotal || 0);
+          const orders = p.orderCount || 0;
           return (
-            <div key={i} className="d-flex flex-column align-items-center position-relative" style={{minWidth:'40px'}}>
+            <div key={i} className="d-flex flex-column align-items-center position-relative" style={{minWidth:'42px'}}
+                 onMouseEnter={()=>setHoverIndex(i)} onMouseLeave={()=>setHoverIndex(h=>h===i?null:h)}>
               <div className="w-100 rounded-top bg-info position-relative" style={{height:`${h}px`, transition:'height .3s'}} role="img" aria-label={`AOV ${label}: KES ${val.toFixed(2)}`}></div>
               <small className="text-muted mt-1" style={{fontSize:'0.55rem'}}>{label}</small>
+              {hoverIndex === i && (
+                <div className="position-absolute translate-middle-x" style={{bottom: h+10, left:'50%', background:'rgba(0,0,0,0.8)', color:'#fff', padding:'4px 6px', borderRadius:4, fontSize:'0.6rem', lineHeight:1.1, whiteSpace:'nowrap', zIndex:20}}>
+                  <div><strong>{label}</strong></div>
+                  <div>AOV: KES {val.toFixed(2)}</div>
+                  <div>Orders: {orders}</div>
+                  <div>Gross: KES {gross.toFixed(2)}</div>
+                </div>
+              )}
             </div>
           );
         })}

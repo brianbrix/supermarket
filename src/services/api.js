@@ -100,7 +100,18 @@ export const api = {
         if (periods != null) params.set('periods', periods);
         const qs = params.toString();
         return request(`/admin/analytics/aov${qs ? `?${qs}` : ''}`);
-      }
+      },
+      unified: ({ from, to, granularity='DAILY', statuses=[], includeRefunded=false, includeCancelled=false } = {}) => {
+        const params = new URLSearchParams();
+        if (from) params.set('from', from);
+        if (to) params.set('to', to);
+        if (granularity) params.set('granularity', granularity);
+        statuses.forEach(s => params.append('statuses', s));
+        if (includeRefunded) params.set('includeRefunded','true');
+        if (includeCancelled) params.set('includeCancelled','true');
+        const qs = params.toString();
+        return request(`/admin/analytics/unified${qs?`?${qs}`:''}`);
+      },
     },
     orders: {
       list: (page=0,size=20, filters={}) => {
