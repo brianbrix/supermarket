@@ -120,7 +120,7 @@ export default function AdminPayments() {
               ))}
             </tbody>
           </table>
-          <PaginationBar {...pageMeta} onPageChange={setPage} />
+          <PaginationBar {...pageMeta} onPageChange={setPage} alwaysVisible />
         </div>
       )}
     </div>

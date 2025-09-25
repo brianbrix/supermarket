@@ -150,7 +150,7 @@ export default function AdminOrders() {
               ))}
             </tbody>
           </table>
-          <PaginationBar {...pageMeta} onPageChange={setPage} />
+          <PaginationBar {...pageMeta} onPageChange={setPage} alwaysVisible />
         </div>
       )}
       <OrderDetailModal order={selectedOrder} onClose={()=>setSelectedOrder(null)} />

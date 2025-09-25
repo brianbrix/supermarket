@@ -1,6 +1,7 @@
 import { useEffect, useState, useRef } from 'react';
 import { api, paymentBranding } from '../../services/api.js';
 import '../../App.admin.css';
+import PaginationBar from '../../components/PaginationBar.jsx';
 
 const PROVIDERS = ['MPESA','AIRTEL'];
 // Hide legacy *_STK_PUSH entries; STK is now a capability via supportsStk flag on base channels.
@@ -16,6 +17,9 @@ export default function AdminPaymentOptions(){
   const [editing,setEditing] = useState(null); // object or null
   const [form,setForm] = useState(baseForm());
   const [saving,setSaving] = useState(false);
+  const [pageMeta,setPageMeta] = useState({ page:0, size:20, totalElements:0, totalPages:0, first:true, last:true });
+  const [page,setPage] = useState(0);
+  const size = 20;
   const dialogRef = useRef(null);
 
   function baseForm(){
@@ -40,14 +44,20 @@ export default function AdminPaymentOptions(){
   async function load(){
     setLoading(true);
     try {
-      const data = await api.admin.payments.options.list();
-      setOptions(data);
+      const data = await api.admin.payments.options.list(page, size);
+      if (Array.isArray(data)) {
+        setOptions(data);
+        setPageMeta(pm=>({ ...pm, page, size, totalElements:data.length, totalPages:1, first:true, last:true }));
+      } else {
+        setOptions(data.content || []);
+        setPageMeta(data);
+      }
     } catch(e){
       setError(e.message);
     } finally { setLoading(false); }
   }
 
-  useEffect(()=>{ load(); },[]);
+  useEffect(()=>{ load(); },[page]);
 
   function openCreate(){ setEditing(null); setForm(baseForm()); dialogRef.current.showModal(); }
   function openEdit(opt){ setEditing(opt); setForm({ ...opt }); dialogRef.current.showModal(); }
@@ -117,6 +127,7 @@ export default function AdminPaymentOptions(){
               })}
             </tbody>
           </table>
+          <PaginationBar {...pageMeta} onPageChange={setPage} alwaysVisible />
         </div>
       )}
 

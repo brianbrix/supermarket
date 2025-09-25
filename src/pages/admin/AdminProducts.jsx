@@ -238,7 +238,7 @@ export default function AdminProducts() {
                   ))}
                 </tbody>
               </table>
-              <PaginationBar {...pageMeta} onPageChange={setPage} />
+              <PaginationBar {...pageMeta} onPageChange={setPage} alwaysVisible />
             </div>
           )}
         </div>

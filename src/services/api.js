@@ -179,7 +179,12 @@ export const api = {
         return request(`/admin/payments?${params.toString()}`);
       },
       options: {
-        list: () => request('/admin/payments/options'),
+        list: (page=0,size=20) => {
+          // Support pagination if backend implements it; fallback gracefully if not.
+          const params = new URLSearchParams();
+          params.set('page', page); params.set('size', size);
+          return request(`/admin/payments/options?${params.toString()}`);
+        },
         create: (payload) => request('/admin/payments/options', { method:'POST', body: JSON.stringify(payload)}),
         update: (id,payload) => request(`/admin/payments/options/${id}`, { method:'PUT', body: JSON.stringify(payload)}),
         delete: (id) => request(`/admin/payments/options/${id}`, { method:'DELETE' })
