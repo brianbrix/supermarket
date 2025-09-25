@@ -15,8 +15,8 @@ export default function AdminProducts() {
   const [multiUploading, setMultiUploading] = useState(false);
   const [multiError, setMultiError] = useState(null);
   const [search, setSearch] = useState('');
-  const [draftFilters, setDraftFilters] = useState({ categoryId:'', minPrice:'', maxPrice:'', inStock:'', sort:'createdAt', direction:'desc' });
-  const [appliedFilters, setAppliedFilters] = useState({ categoryId:'', minPrice:'', maxPrice:'', inStock:'', sort:'createdAt', direction:'desc' });
+  const [draftFilters, setDraftFilters] = useState({ categoryId:'', minPrice:'', maxPrice:'', inStock:'', sort:'name', direction:'asc' });
+  const [appliedFilters, setAppliedFilters] = useState({ categoryId:'', minPrice:'', maxPrice:'', inStock:'', sort:'name', direction:'asc' });
   const debounceRef = useRef();
   const firstDebounceRef = useRef(true); // skip the initial debounce which mirrors defaults
   const didInitialLoadRef = useRef(false); // guard StrictMode double invoke
@@ -61,7 +61,7 @@ export default function AdminProducts() {
       return;
     }
     load();
-  }, [page, appliedFilters]);
+  }, [page, size, appliedFilters]);
   // Debounce draft -> applied (skip first render because values already identical)
   useEffect(() => {
     if (firstDebounceRef.current) { firstDebounceRef.current = false; return; }
@@ -71,7 +71,7 @@ export default function AdminProducts() {
   }, [search, draftFilters.categoryId, draftFilters.minPrice, draftFilters.maxPrice, draftFilters.inStock]);
   function updateAdv(name,value){ setDraftFilters(f=>({...f,[name]:value})); }
   function applySort(e){ const [s,d]=e.target.value.split(':'); setDraftFilters(f=>({...f, sort:s, direction:d })); setAppliedFilters(a=>({...a, sort:s, direction:d })); setPage(0); load(true); }
-  function resetFilters(){ const base={ categoryId:'', minPrice:'', maxPrice:'', inStock:'', sort:'createdAt', direction:'desc' }; setDraftFilters(base); setAppliedFilters(base); setSearch(''); setPage(0); load(true); }
+  function resetFilters(){ const base={ categoryId:'', minPrice:'', maxPrice:'', inStock:'', sort:'name', direction:'asc' }; setDraftFilters(base); setAppliedFilters(base); setSearch(''); setPage(0); load(true); }
 
   function handleChange(e){
     const { name, value } = e.target;
@@ -200,17 +200,17 @@ export default function AdminProducts() {
         </FilterBar.Field>
         <FilterBar.Field label="Sort" width="col-6 col-md-2">
           <select className="form-select form-select-sm" value={`${draftFilters.sort}:${draftFilters.direction}`} onChange={applySort}>
-            <option value="createdAt:desc">Newest</option>
-            <option value="createdAt:asc">Oldest</option>
-            <option value="price:desc">Price High→Low</option>
-            <option value="price:asc">Price Low→High</option>
-            <option value="stock:desc">Stock High→Low</option>
-            <option value="stock:asc">Stock Low→High</option>
             <option value="name:asc">Name A→Z</option>
             <option value="name:desc">Name Z→A</option>
+            <option value="price:asc">Price Low→High</option>
+            <option value="price:desc">Price High→Low</option>
+            <option value="stock:asc">Stock Low→High</option>
+            <option value="stock:desc">Stock High→Low</option>
+            <option value="id:asc">ID Asc</option>
+            <option value="id:desc">ID Desc</option>
           </select>
         </FilterBar.Field>
-  <FilterBar.Reset onClick={resetFilters} disabled={!search && !draftFilters.categoryId && !draftFilters.minPrice && !draftFilters.maxPrice && !draftFilters.inStock && draftFilters.sort==='createdAt' && draftFilters.direction==='desc'} />
+  <FilterBar.Reset onClick={resetFilters} disabled={!search && !draftFilters.categoryId && !draftFilters.minPrice && !draftFilters.maxPrice && !draftFilters.inStock && draftFilters.sort==='name' && draftFilters.direction==='asc'} />
       </FilterBar>
       <div className="row">
         <div className="col-12 col-lg-7 mb-4 mb-lg-0">

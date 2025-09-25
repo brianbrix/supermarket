@@ -58,8 +58,23 @@ public class OrderRepositoryImpl implements OrderRepositoryCustom {
         }
 
         cq.where(predicates.toArray(new Predicate[0]));
-        // Order
-        cq.orderBy(cb.desc(root.get("createdAt")));
+        // Apply dynamic ordering from pageable if provided; fallback to createdAt DESC
+        java.util.List<jakarta.persistence.criteria.Order> orderList = new java.util.ArrayList<>();
+        if (pageable.getSort() != null && pageable.getSort().isSorted()) {
+            for (org.springframework.data.domain.Sort.Order o : pageable.getSort()) {
+                String prop = o.getProperty();
+                // Whitelist allowed sortable properties matching OrderService.buildSort
+                if (!java.util.List.of("createdAt","totalGross","status","id").contains(prop)) {
+                    continue; // skip unknown to avoid runtime errors
+                }
+                Path<?> path = root.get(prop);
+                orderList.add(o.isAscending() ? cb.asc(path) : cb.desc(path));
+            }
+        }
+        if (orderList.isEmpty()) {
+            orderList.add(cb.desc(root.get("createdAt")));
+        }
+        cq.orderBy(orderList);
 
         TypedQuery<Order> query = em.createQuery(cq);
         // Pagination
