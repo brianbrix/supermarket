@@ -112,6 +112,13 @@ export const api = {
         const qs = params.toString();
         return request(`/admin/analytics/unified${qs?`?${qs}`:''}`);
       },
+      advanced: ({ from, to } = {}) => {
+        const params = new URLSearchParams();
+        if (from) params.set('from', from);
+        if (to) params.set('to', to);
+        const qs = params.toString();
+        return request(`/admin/analytics/advanced${qs?`?${qs}`:''}`);
+      }
     },
     orders: {
       list: (page=0,size=20, filters={}) => {

@@ -1,4 +1,6 @@
 import { useEffect, useState, useMemo } from 'react';
+import { createPortal } from 'react-dom';
+import { buildTooltip } from '../../utils/metricsGlossary';
 import '../../App.admin.css';
 import { api } from '../../services/api.js';
 import InfoTooltip from '../../components/InfoTooltip.jsx';
@@ -23,6 +25,10 @@ export default function AdminAnalytics(){
   const [statuses, setStatuses] = useState(['PENDING','PROCESSING','SHIPPED','DELIVERED']);
   const [includeRefunded, setIncludeRefunded] = useState(false);
   const [includeCancelled, setIncludeCancelled] = useState(false);
+  // Advanced analytics
+  const [advanced, setAdvanced] = useState(null);
+  const [advLoading, setAdvLoading] = useState(false);
+  const [advError, setAdvError] = useState(null);
 
   useEffect(()=>{
     let active = true;
@@ -51,6 +57,16 @@ export default function AdminAnalytics(){
       .catch(e => { if(!active) return; setUError(e.message); setULoading(false); });
     return ()=>{ active = false; };
   }, [range.from, range.to, granularity, statuses, includeRefunded, includeCancelled]);
+
+  // Advanced fetch (reuses same date range window)
+  useEffect(()=>{
+    let active = true;
+    setAdvLoading(true); setAdvError(null);
+    api.admin.analytics.advanced({ from: range.from, to: range.to })
+      .then(data => { if(!active) return; setAdvanced(data); setAdvLoading(false); })
+      .catch(e => { if(!active) return; setAdvError(e.message); setAdvLoading(false); });
+    return ()=>{ active=false; };
+  }, [range.from, range.to]);
 
   return (
     <div className="container py-4">
@@ -103,7 +119,7 @@ export default function AdminAnalytics(){
               </div>
             )}
           </section>
-          <RevenueTrendSection trendMode={trendMode} setTrendMode={setTrendMode} analytics={extended} />
+          {/* Revenue trend now unified: we will render it below using unified buckets so gross matches AOV */}
           <section className="mb-5">
             <h2 className="h6 mb-3 d-flex align-items-center gap-2">Order Status Funnel (Snapshot)
               <InfoTooltip text="Current counts of orders by status. Operational WIP snapshot, not a sequential conversion metric yet." />
@@ -127,6 +143,8 @@ export default function AdminAnalytics(){
         includeCancelled={includeCancelled}
         setIncludeCancelled={setIncludeCancelled}
       />
+      <RevenueTrendSection unified={unified} />
+  <AdvancedSections advanced={advanced} loading={advLoading} error={advError} />
       <section className="mb-5">
         <h2 className="h6 mb-3">Coming Soon</h2>
         <ul className="small text-muted mb-0">
@@ -171,6 +189,7 @@ function AnalyticCard({ title, value, accent }) {
 
 function MiniBarChart({ data, height=160 }) {
   const [hoverKey, setHoverKey] = useState(null);
+  const [coords, setCoords] = useState({x:0,y:0});
   const max = Math.max(...data.map(d => Number(d.revenue)), 1);
   return (
     <div className="position-relative">
@@ -179,14 +198,11 @@ function MiniBarChart({ data, height=160 }) {
           const h = (Number(d.revenue)/max)*(height-40); // reserve top space for tooltip
           return (
             <div key={d.key} className="d-flex flex-column align-items-center position-relative" style={{minWidth:'34px'}}
-                 onMouseEnter={()=>setHoverKey(d.key)} onMouseLeave={()=>setHoverKey(k=>k===d.key?null:k)}>
+                 onMouseEnter={e=>{ const rect=e.currentTarget.getBoundingClientRect(); setCoords({x:rect.left+rect.width/2, y:rect.top-6}); setHoverKey(d.key);} }
+                 onMouseLeave={()=>setHoverKey(k=>k===d.key?null:k)}>
               <div className="w-100 rounded-top bg-success position-relative" style={{height:`${h}px`, transition:'height .3s'}} role="img" aria-label={`Revenue ${d.label}: KES ${Number(d.revenue).toFixed(2)}`}></div>
               <small className="text-muted mt-1" style={{fontSize:'0.55rem'}}>{d.label}</small>
-              {hoverKey === d.key && (
-                <div className="position-absolute translate-middle-x" style={{bottom: h+8, left:'50%', background:'rgba(0,0,0,0.75)', color:'#fff', padding:'2px 6px', borderRadius:'4px', fontSize:'0.6rem', whiteSpace:'nowrap', zIndex:10}}>
-                  KES {Number(d.revenue).toFixed(2)}
-                </div>
-              )}
+              {hoverKey === d.key && <ChartTooltipPortal x={coords.x} y={coords.y} children={`KES ${Number(d.revenue).toFixed(2)}`} />}
             </div>
           );
         })}
@@ -195,48 +211,39 @@ function MiniBarChart({ data, height=160 }) {
   );
 }
 
-function RevenueTrendSection({ trendMode, setTrendMode, analytics }) {
-  const dailyData = analytics.revenueTrendDaily || analytics.revenueTrend || [];
-  const weeklyData = analytics.revenueTrendWeekly || [];
-  const monthlyData = analytics.revenueTrendMonthly || [];
-
-  const normalizedDaily = useMemo(()=> dailyData.map(d => ({ key: d.day, label: d.day.slice(5), revenue: d.revenue })), [dailyData]);
-  const normalizedWeekly = useMemo(()=> weeklyData.map(w => ({ key: w.weekStart, label: w.weekStart.slice(5), revenue: w.revenue })), [weeklyData]);
-  const normalizedMonthly = useMemo(()=> monthlyData.map(m => ({ key: `${m.year}-${String(m.month).padStart(2,'0')}`, label: `${String(m.month).padStart(2,'0')}`, revenue: m.revenue })), [monthlyData]);
-
-  const chartData = trendMode === 'daily' ? normalizedDaily : trendMode === 'weekly' ? normalizedWeekly : normalizedMonthly;
-
-  const stats = useMemo(() => {
-    if (!chartData.length) return null;
-    const total = chartData.reduce((sum, r) => sum + Number(r.revenue), 0);
-    const avg = total / chartData.length;
-    const best = chartData.reduce((a,b)=> Number(b.revenue) > Number(a.revenue) ? b : a, chartData[0]);
+// Unified revenue trend derived from unified buckets so gross matches AOV sums.
+function RevenueTrendSection({ unified }) {
+  const buckets = unified?.buckets || [];
+  const data = useMemo(()=> buckets.map(b => ({ key: b.start, label: b.start.slice(5,10), revenue: b.gross })), [buckets]);
+  const stats = useMemo(()=>{
+    if(!data.length) return null;
+    const total = data.reduce((s,d)=> s + Number(d.revenue),0);
+    const avg = total / data.length;
+    const best = data.reduce((a,b)=> Number(b.revenue) > Number(a.revenue) ? b : a, data[0]);
     return { total, avg, best };
-  }, [chartData]);
-
-  const pct = trendMode === 'daily' ? analytics.dailyChangePct : trendMode === 'weekly' ? analytics.weeklyChangePct : analytics.monthlyChangePct;
-  const pctBadge = pct == null ? null : (
-    <span className={`badge ms-2 ${pct > 0 ? 'text-bg-success':'text-bg-danger'}`}>{pct > 0 ? '+' : ''}{pct.toFixed(1)}%</span>
-  );
-
-  const trendTooltip = 'Revenue buckets: Sum of gross order totals grouped by the selected granularity. Change % compares the latest complete bucket to the previous one.';
+  },[data]);
+  const change = useMemo(()=>{
+    if(data.length < 2) return null;
+    const last = Number(data[data.length-1].revenue);
+    const prev = Number(data[data.length-2].revenue);
+    if(prev === 0) return null;
+    return ((last - prev)/prev)*100;
+  },[data]);
+  const trendTooltip = 'Unified revenue trend: each bar = bucket gross. Uses same filters & range as AOV; values will match Gross (Sum) total.';
   return (
     <section className="mb-5" aria-label={trendTooltip}>
       <div className="d-flex align-items-center justify-content-between mb-2 flex-wrap gap-2">
-        <h2 className="h6 m-0 d-flex align-items-center gap-2">Revenue Trend ({trendMode.charAt(0).toUpperCase()+trendMode.slice(1)}) {pctBadge}<InfoTooltip text={trendTooltip} /></h2>
-        <div className="btn-group btn-group-sm" role="group" aria-label="Trend granularity">
-          <button type="button" className={`btn btn-${trendMode==='daily'?'primary':'outline-primary'}`} onClick={()=>setTrendMode('daily')}>Daily</button>
-          <button type="button" className={`btn btn-${trendMode==='weekly'?'primary':'outline-primary'}`} onClick={()=>setTrendMode('weekly')}>Weekly</button>
-          <button type="button" className={`btn btn-${trendMode==='monthly'?'primary':'outline-primary'}`} onClick={()=>setTrendMode('monthly')}>Monthly</button>
-        </div>
+        <h2 className="h6 m-0 d-flex align-items-center gap-2">Revenue Trend (Unified){change!=null && (
+          <span className={`badge ms-2 ${change>0?'text-bg-success':'text-bg-danger'}`}>{change>0?'+':''}{change.toFixed(1)}%</span>
+        )}<InfoTooltip text={trendTooltip} /></h2>
       </div>
-      {chartData.length === 0 ? <ChartSkeleton /> : <MiniBarChart data={chartData} />}
+      {data.length === 0 ? <ChartSkeleton /> : <MiniBarChart data={data} />}
       {stats && (
         <div className="row row-cols-2 row-cols-sm-4 g-2 mt-3 small">
           <div className="col"><div className="p-2 bg-body-tertiary rounded">Total<br/><strong>KES {stats.total.toFixed(2)}</strong></div></div>
-            <div className="col"><div className="p-2 bg-body-tertiary rounded">Average<br/><strong>KES {stats.avg.toFixed(2)}</strong></div></div>
-            <div className="col"><div className="p-2 bg-body-tertiary rounded">Best {trendMode==='daily'?'Day': trendMode==='weekly'?'Week':'Month'}<br/><strong>KES {Number(stats.best.revenue).toFixed(2)}</strong></div></div>
-            <div className="col"><div className="p-2 bg-body-tertiary rounded">Points<br/><strong>{chartData.length}</strong></div></div>
+          <div className="col"><div className="p-2 bg-body-tertiary rounded">Average<br/><strong>KES {stats.avg.toFixed(2)}</strong></div></div>
+          <div className="col"><div className="p-2 bg-body-tertiary rounded">Best Bucket<br/><strong>KES {Number(stats.best.revenue).toFixed(2)}</strong></div></div>
+          <div className="col"><div className="p-2 bg-body-tertiary rounded">Buckets<br/><strong>{data.length}</strong></div></div>
         </div>
       )}
     </section>
@@ -279,7 +286,7 @@ function StatusFunnel({ stats }) {
 }
 
 function UnifiedSection({ unified, loading, error, granularity, onGranularityChange, range, setRange, statuses, setStatuses, includeRefunded, setIncludeRefunded, includeCancelled, setIncludeCancelled }) {
-  const tip = 'Unified analytics: buckets with gross revenue, order counts, derived AOV, and overall aggregates. Filters: statuses, refunded/cancelled inclusion, date range.';
+  const tip = 'Average Order Value vs Time: buckets with gross revenue, order counts, derived AOV, and overall aggregates. Filters: statuses, refunded/cancelled inclusion, date range.';
   const buckets = unified?.buckets || [];
   const current = buckets[buckets.length-1];
   const previous = buckets[buckets.length-2];
@@ -306,7 +313,7 @@ function UnifiedSection({ unified, loading, error, granularity, onGranularityCha
     <section className="mb-5" aria-label={tip}>
       <div className="d-flex flex-column flex-lg-row justify-content-between gap-2 mb-2">
         <div>
-          <h2 className="h6 m-0 d-flex align-items-center gap-2">Unified Analytics ({granularity}) {percentChange!=null && (
+          <h2 className="h6 m-0 d-flex align-items-center gap-2">Average Order Value vs Time ({granularity}) {percentChange!=null && (
             <span className={`badge ms-2 ${percentChange>0?'text-bg-success':'text-bg-danger'}`}>{percentChange>0?'+':''}{percentChange.toFixed(2)}%</span>
           )}<InfoTooltip text={tip} /></h2>
           <div className="small text-muted mt-1">{subtitle}</div>
@@ -352,10 +359,12 @@ function UnifiedSection({ unified, loading, error, granularity, onGranularityCha
 
 function AovMiniChart({ points, granularity, height=160 }) {
   const [hoverIndex, setHoverIndex] = useState(null);
+  const [coords, setCoords] = useState({x:0,y:0});
   const max = Math.max(...points.map(p => Number(p.aov)), 1);
   return (
     <div className="position-relative">
-      <div className="d-flex align-items-end gap-1" style={{height:`${height}px`, overflowX:'auto'}}>
+      {/* Removed horizontal scrolling: bars now flex to available width */}
+      <div className="d-flex align-items-end gap-1" style={{height:`${height}px`}}>
         {points.map((p,i) => {
           const val = Number(p.aov);
           const h = (val/max)*(height-40);
@@ -363,22 +372,117 @@ function AovMiniChart({ points, granularity, height=160 }) {
           const gross = Number(p.grossTotal || 0);
           const orders = p.orderCount || 0;
           return (
-            <div key={i} className="d-flex flex-column align-items-center position-relative" style={{minWidth:'42px'}}
-                 onMouseEnter={()=>setHoverIndex(i)} onMouseLeave={()=>setHoverIndex(h=>h===i?null:h)}>
+            <div key={i} className="d-flex flex-column align-items-center position-relative" style={{flex:'1 1 0'}}
+                 onMouseEnter={e=>{ const rect=e.currentTarget.getBoundingClientRect(); setCoords({x:rect.left+rect.width/2, y:rect.top-8}); setHoverIndex(i);} }
+                 onMouseLeave={()=>setHoverIndex(h=>h===i?null:h)}>
               <div className="w-100 rounded-top bg-info position-relative" style={{height:`${h}px`, transition:'height .3s'}} role="img" aria-label={`AOV ${label}: KES ${val.toFixed(2)}`}></div>
               <small className="text-muted mt-1" style={{fontSize:'0.55rem'}}>{label}</small>
               {hoverIndex === i && (
-                <div className="position-absolute translate-middle-x" style={{bottom: h+10, left:'50%', background:'rgba(0,0,0,0.8)', color:'#fff', padding:'4px 6px', borderRadius:4, fontSize:'0.6rem', lineHeight:1.1, whiteSpace:'nowrap', zIndex:20}}>
-                  <div><strong>{label}</strong></div>
+                <ChartTooltipPortal x={coords.x} y={coords.y}>
+                  <div style={{fontWeight:'600'}}>{label}</div>
                   <div>AOV: KES {val.toFixed(2)}</div>
                   <div>Orders: {orders}</div>
                   <div>Gross: KES {gross.toFixed(2)}</div>
-                </div>
+                </ChartTooltipPortal>
               )}
             </div>
           );
         })}
       </div>
     </div>
+  );
+}
+
+// Portal component for chart tooltips to break out of clipping/stacking contexts
+function ChartTooltipPortal({ x, y, children }) {
+  const el = useMemo(()=>{
+    const div = document.createElement('div');
+    div.style.position = 'fixed';
+    div.style.top = `${y}px`;
+    div.style.left = `${x}px`;
+    div.style.transform = 'translate(-50%, -100%)';
+    div.style.background = 'rgba(0,0,0,0.9)';
+    div.style.color = '#fff';
+    div.style.padding = '6px 10px';
+    div.style.fontSize = '0.65rem';
+    div.style.lineHeight = '1.15';
+    div.style.borderRadius = '6px';
+    div.style.pointerEvents = 'none';
+    div.style.zIndex = '2147483647';
+    div.style.boxShadow = '0 4px 12px rgba(0,0,0,0.5)';
+    div.style.whiteSpace = 'nowrap';
+    return div;
+  }, [x,y]);
+  useEffect(()=>{
+    document.body.appendChild(el);
+    return ()=>{ document.body.removeChild(el); };
+  }, [el]);
+  // Update coordinates on prop change
+  useEffect(()=>{
+    el.style.top = `${y}px`;
+    el.style.left = `${x}px`;
+  }, [x,y,el]);
+  return createPortal(children, el);
+}
+
+function AdvancedSections({ advanced, loading, error }) {
+  if (loading) return <ChartSkeleton />; // reuse skeleton for simplicity
+  if (error) return <div className="alert alert-danger small">{error}</div>;
+  if (!advanced) return null;
+  const { customers, retention, funnel } = advanced;
+
+  const t = {
+    repeat: buildTooltip('repeatRate'),
+    repeatCustomers: buildTooltip('repeatCustomers'),
+    repeatOrders: buildTooltip('ordersFromRepeat'),
+    repeatOrderShare: buildTooltip('repeatOrderShare'),
+    retention: buildTooltip('retentionRate'),
+    churn: buildTooltip('churnRate'),
+    fPendingProcessing: buildTooltip('funnelPendingToProcessing'),
+    fProcessingShipped: buildTooltip('funnelProcessingToShipped'),
+    fShippedDelivered: buildTooltip('funnelShippedToDelivered'),
+    fOverall: buildTooltip('funnelOverallDelivered'),
+    cancellation: buildTooltip('cancellationRate'),
+    refund: buildTooltip('refundRate')
+  };
+
+  return (
+    <section className="mb-5">
+      <h2 className="h6 mb-3 d-flex align-items-center gap-2">Customer Metrics<InfoTooltip text={t.repeat} /></h2>
+      <div className="row row-cols-2 row-cols-sm-3 row-cols-lg-6 g-2 small mb-4">
+        <div className="col"><div className="p-2 bg-body-tertiary rounded">Customers<br/><strong>{customers.totalCustomers}</strong></div></div>
+        <div className="col"><div className="p-2 bg-body-tertiary rounded d-flex flex-column">Repeat <InfoTooltip text={t.repeatCustomers} /><strong>{customers.repeatCustomers}</strong></div></div>
+        <div className="col"><div className="p-2 bg-body-tertiary rounded d-flex flex-column">Repeat Rate <InfoTooltip text={t.repeat} /><strong>{Number(customers.repeatRatePct).toFixed(2)}%</strong></div></div>
+        <div className="col"><div className="p-2 bg-body-tertiary rounded">Orders (Total)<br/><strong>{customers.totalOrders}</strong></div></div>
+        <div className="col"><div className="p-2 bg-body-tertiary rounded d-flex flex-column">Orders from Repeat <InfoTooltip text={t.repeatOrders} /><strong>{customers.ordersFromRepeat}</strong></div></div>
+        <div className="col"><div className="p-2 bg-body-tertiary rounded d-flex flex-column">Repeat Order Share <InfoTooltip text={t.repeatOrderShare} /><strong>{Number(customers.ordersFromRepeatPct).toFixed(2)}%</strong></div></div>
+      </div>
+      <h3 className="h6 mb-3 d-flex align-items-center gap-2">Retention & Churn<InfoTooltip text={t.retention} /></h3>
+      <div className="row row-cols-2 row-cols-sm-3 row-cols-lg-6 g-2 small mb-4">
+        <div className="col"><div className="p-2 bg-body-tertiary rounded">Prev Window Cust<br/><strong>{retention.previousWindowCustomers}</strong></div></div>
+        <div className="col"><div className="p-2 bg-body-tertiary rounded d-flex flex-column">Retained <InfoTooltip text={t.retention} /><strong>{retention.retainedCustomers}</strong></div></div>
+        <div className="col"><div className="p-2 bg-body-tertiary rounded d-flex flex-column">Retention Rate <InfoTooltip text={t.retention} /><strong>{Number(retention.retentionRatePct).toFixed(2)}%</strong></div></div>
+        <div className="col"><div className="p-2 bg-body-tertiary rounded d-flex flex-column">Churned <InfoTooltip text={t.churn} /><strong>{retention.churnedCustomers}</strong></div></div>
+        <div className="col"><div className="p-2 bg-body-tertiary rounded d-flex flex-column">Churn Rate <InfoTooltip text={t.churn} /><strong>{Number(retention.churnRatePct).toFixed(2)}%</strong></div></div>
+        <div className="col"><div className="p-2 bg-body-tertiary rounded">Window Length (days)<br/><strong>{Math.max(1, Math.round((new Date(advanced.to).getTime()-new Date(advanced.from).getTime())/86400000))}</strong></div></div>
+      </div>
+      <h3 className="h6 mb-3 d-flex align-items-center gap-2">Order Funnel Conversion<InfoTooltip text={t.fPendingProcessing} /></h3>
+      <div className="row row-cols-2 row-cols-sm-3 row-cols-lg-6 g-2 small mb-3">
+        <div className="col"><div className="p-2 bg-body-tertiary rounded">Pending<br/><strong>{funnel.pending}</strong></div></div>
+        <div className="col"><div className="p-2 bg-body-tertiary rounded">Processing<br/><strong>{funnel.processing}</strong></div></div>
+        <div className="col"><div className="p-2 bg-body-tertiary rounded">Shipped<br/><strong>{funnel.shipped}</strong></div></div>
+        <div className="col"><div className="p-2 bg-body-tertiary rounded">Delivered<br/><strong>{funnel.delivered}</strong></div></div>
+        <div className="col"><div className="p-2 bg-body-tertiary rounded">Cancelled<br/><strong>{funnel.cancelled}</strong></div></div>
+        <div className="col"><div className="p-2 bg-body-tertiary rounded">Refunded<br/><strong>{funnel.refunded}</strong></div></div>
+      </div>
+      <div className="row row-cols-2 row-cols-sm-3 row-cols-lg-6 g-2 small">
+        <div className="col"><div className="p-2 bg-body-tertiary rounded d-flex flex-column">Pending→Processing <InfoTooltip text={t.fPendingProcessing} /><strong>{Number(funnel.convPendingToProcessing).toFixed(2)}%</strong></div></div>
+        <div className="col"><div className="p-2 bg-body-tertiary rounded d-flex flex-column">Processing→Shipped <InfoTooltip text={t.fProcessingShipped} /><strong>{Number(funnel.convProcessingToShipped).toFixed(2)}%</strong></div></div>
+        <div className="col"><div className="p-2 bg-body-tertiary rounded d-flex flex-column">Shipped→Delivered <InfoTooltip text={t.fShippedDelivered} /><strong>{Number(funnel.convShippedToDelivered).toFixed(2)}%</strong></div></div>
+        <div className="col"><div className="p-2 bg-body-tertiary rounded d-flex flex-column">Overall Delivered <InfoTooltip text={t.fOverall} /><strong>{Number(funnel.overallConversionToDelivered).toFixed(2)}%</strong></div></div>
+        <div className="col"><div className="p-2 bg-body-tertiary rounded d-flex flex-column">Cancellation Rate <InfoTooltip text={t.cancellation} /><strong>{Number(funnel.cancellationRatePct).toFixed(2)}%</strong></div></div>
+        <div className="col"><div className="p-2 bg-body-tertiary rounded d-flex flex-column">Refund Rate <InfoTooltip text={t.refund} /><strong>{Number(funnel.refundRatePct).toFixed(2)}%</strong></div></div>
+      </div>
+    </section>
   );
 }
