@@ -45,11 +45,6 @@ export default function Navbar() {
               </NavLink>
             </li>
             <li className="nav-item">
-              <NavLink className={({isActive})=>`nav-link px-3 d-flex align-items-center gap-1${isActive?' active fw-semibold':''}`} to="/checkout">
-                <i className="bi bi-credit-card"></i><span>Checkout</span>
-              </NavLink>
-            </li>
-            <li className="nav-item">
               <NavLink className={({isActive})=>`nav-link px-3 d-flex align-items-center gap-1${isActive?' active fw-semibold':''}`} to="/about">
                 <i className="bi bi-info-circle-fill"></i><span>About</span>
               </NavLink>

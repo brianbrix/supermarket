@@ -1,7 +1,7 @@
 import { useEffect, useState } from 'react';
 import { useForm } from 'react-hook-form';
 import { nameRules, phoneRules, addressRules } from '../utils/validation.js';
-import { useNavigate, useSearchParams } from 'react-router-dom';
+import { Link, useNavigate } from 'react-router-dom';
 import { useCart } from '../context/CartContext.jsx';
 import { useToast } from '../context/ToastContext.jsx';
 import { formatKES } from '../utils/currency.js';
@@ -15,30 +15,26 @@ import { generateOrderRef, sendEmailMock } from '../services/orderService.js';
 import { useMobileMoneyPayment } from '../hooks/useMobileMoneyPayment.js';
 import PaymentOptionModal from '../components/PaymentOptionModal.jsx';
 import { paymentBranding, api } from '../services/api.js';
+import { useAuth } from '../context/AuthContext.jsx';
+
+function buildCartSignature(list) {
+  if (!Array.isArray(list) || list.length === 0) return '';
+  return [...list]
+    .map(item => `${item.id}:${item.qty}`)
+    .sort()
+    .join('|');
+}
 
 export default function Checkout() {
-  const { items, total, clearCart } = useCart();
+  const { user: authUser } = useAuth();
+  const { items, total, clearCart, backupCart, restoreCart, clearCartBackup, hasCartBackup } = useCart();
   const VAT_RATE = 0.16; // 16% VAT (prices assumed VAT-inclusive)
   const { push } = useToast();
   const navigate = useNavigate();
-  const [searchParams] = useSearchParams();
 
   const persisted = (() => {
     try { return JSON.parse(sessionStorage.getItem('checkout') || '{}'); } catch { return {}; }
   })();
-  // Only block entry if no items AND no in-progress/finished order in session
-  if (!items.length) {
-    const persistedHasOrder = persisted && (persisted.submitted || persisted.step >= 2);
-    if (!persistedHasOrder) {
-      return (
-        <section>
-          <h1>Checkout</h1>
-          <p>Your cart is empty. Add items first.</p>
-          <button onClick={() => navigate('/')}>Browse Products</button>
-        </section>
-      );
-    }
-  }
   // react-hook-form integration for step 1 (customer details)
   const defaultValues = {
     name: persisted.form?.name || '',
@@ -66,6 +62,61 @@ export default function Checkout() {
   const [modalPhone, setModalPhone] = useState(form.phone || '');
   const [modalAccountRef, setModalAccountRef] = useState('');
   const [optionsLoading, setOptionsLoading] = useState(false);
+
+  const hasResumableOrder = Boolean(
+    submitted ||
+    step >= 2 ||
+    (orderSnapshot && Array.isArray(orderSnapshot.items) && orderSnapshot.items.length > 0) ||
+    (persisted && persisted.orderSnapshot && Array.isArray(persisted.orderSnapshot.items) && persisted.orderSnapshot.items.length > 0)
+  );
+  const shouldRedirectToCart = items.length === 0 && !hasResumableOrder;
+
+  useEffect(() => {
+    if (shouldRedirectToCart) {
+      try { sessionStorage.removeItem('checkout'); } catch {}
+      setModalOpen(false);
+    }
+  }, [shouldRedirectToCart]);
+
+  const effectivePaymentStatus = mm.payment?.status ?? orderSnapshot?.paymentStatus ?? null;
+  const modalPaymentState = (() => {
+    if (mm.status && mm.status !== 'idle') return mm.status;
+    if (!effectivePaymentStatus) return mm.status;
+    if (effectivePaymentStatus === 'SUCCESS') return 'succeeded';
+    if (effectivePaymentStatus === 'FAILED') return 'failed';
+    return 'pending';
+  })();
+  const liveCartTotal = Number.isFinite(Number(total)) ? Number(total) : 0;
+  const snapshotTotal = Number.isFinite(Number(orderSnapshot?.total)) ? Number(orderSnapshot.total) : liveCartTotal;
+  const formattedSnapshotTotal = snapshotTotal.toFixed(2);
+
+  const parseMoney = (value) => {
+    if (value == null) return null;
+    if (typeof value === 'object') {
+      if (value.amount != null) return parseMoney(value.amount);
+      if (value.value != null) return parseMoney(value.value);
+    }
+    const numeric = Number(value);
+    return Number.isFinite(numeric) ? numeric : null;
+  };
+
+  const roundCurrency = (value) => {
+    if (!Number.isFinite(value)) return null;
+    return Math.round(value * 100) / 100;
+  };
+
+  function summarizeInstructions(md) {
+    if (!md) return '';
+    try {
+      const first = (md.split('\n').find(l => l.trim().length>0) || '').trim();
+      if (!first) return '';
+      // strip very basic markdown: **bold**, *italics*, `code`
+      return first
+        .replace(/\*\*(.+?)\*\*/g,'$1')
+        .replace(/\*(.+?)\*/g,'$1')
+        .replace(/`(.+?)`/g,'$1');
+    } catch { return ''; }
+  }
 
   function persist(partial) {
     const data = {
@@ -106,20 +157,36 @@ export default function Checkout() {
   };
 
   async function initiateMobileMoneyReal() {
-    if (mm.status === 'initiating' || mm.status === 'pending') return;
+    if (['initiating','pending','reconciling'].includes(mm.status)) {
+      push('Payment already in progress. Please wait for confirmation before starting another.', 'warning');
+      setModalOpen(true);
+      return;
+    }
+    if (orderSnapshot?.backendOrderId && ['INITIATED','PENDING'].includes(orderSnapshot?.paymentStatus ?? '')) {
+      push('An order payment is already in progress. Please wait for confirmation or restart checkout to create a new order.', 'warning');
+      setModalOpen(true);
+      return;
+    }
     try {
       const provider = payMethod === 'mpesa' ? 'MPESA' : 'AIRTEL';
       const channel = payMethod === 'mpesa' ? 'MPESA_STK_PUSH' : 'AIRTEL_STK_PUSH';
       const payload = {
-        orderId: orderSnapshot?.backendOrderId || (orderSnapshot?.tempOrderId), // placeholder; real order create could return id
+        orderId: orderSnapshot?.backendOrderId || orderSnapshot?.tempOrderId,
         provider,
         channel,
         method: 'MOBILE_MONEY',
-        amount: Number(total).toFixed(2),
+        amount: formattedSnapshotTotal,
         phoneNumber: form.phone
       };
       // Ensure order exists in backend before payment (create if not already saved)
       let backendOrderId = orderSnapshot?.backendOrderId;
+      const snapshotUserId = orderSnapshot?.userId ?? null;
+      const currentUserId = authUser?.id ?? null;
+      if (backendOrderId && snapshotUserId !== currentUserId) {
+        backendOrderId = null;
+        setOrderSnapshot(null);
+        persist({ orderSnapshot: null });
+      }
       if (!backendOrderId) {
         const created = await ensureBackendOrder();
         if (!created) return; // error already surfaced
@@ -142,8 +209,62 @@ export default function Checkout() {
         customerPhone: form.phone,
         items: items.map(i => ({ productId: i.id, quantity: i.qty }))
       });
-      setOrderSnapshot(os => ({ ...(os||{}), backendOrderId: created.id }));
-      persist({ orderSnapshot: { ...(orderSnapshot||{}), backendOrderId: created.id } });
+      // Create a snapshot of the current cart for display and receipts before clearing
+      const cartSig = buildCartSignature(items);
+      const backendSubtotal = parseMoney(created?.totalNet ?? created?.subtotal ?? created?.netTotal);
+      const backendVat = parseMoney(created?.vatAmount ?? created?.vat ?? created?.taxAmount);
+      const backendTotal = parseMoney(created?.totalGross ?? created?.total ?? created?.totalAmount);
+
+      const computedVat = roundCurrency(liveCartTotal - (liveCartTotal / (1 + VAT_RATE)));
+      const fallbackVat = computedVat ?? 0;
+      const computedNet = roundCurrency(liveCartTotal - fallbackVat);
+      const fallbackNet = computedNet ?? liveCartTotal;
+
+      const snapshotItems = Array.isArray(created?.items) && created.items.length > 0
+        ? created.items.map((item, idx) => {
+            const fallbackSource = items[idx];
+            const product = item.product || {};
+            const qtyRaw = item.quantity ?? item.qty ?? fallbackSource?.qty ?? 0;
+            const qty = Number.isFinite(Number(qtyRaw)) ? Number(qtyRaw) : 0;
+            const lineGross = parseMoney(item.totalGross ?? item.lineTotal ?? item.totalAmount ?? item.total);
+            const unitGross = parseMoney(item.unitPriceGross ?? item.price ?? item.unitPrice);
+            const fallbackUnit = parseMoney(fallbackSource?.price);
+            const resolvedUnit = unitGross != null ? unitGross : (qty > 0 && lineGross != null ? lineGross / qty : fallbackUnit);
+            const productId = product.id ?? item.productId ?? fallbackSource?.id ?? item.id ?? idx;
+            const label = (product.name ?? item.productName ?? item.name ?? fallbackSource?.name ?? `Item ${productId}`).toString();
+            const roundedUnit = roundCurrency(resolvedUnit) ?? fallbackUnit ?? 0;
+            return { id: productId, name: label, price: roundedUnit, qty };
+          })
+        : items.map(i => {
+            const qty = Number.isFinite(Number(i.qty)) ? Number(i.qty) : 0;
+            const price = parseMoney(i.price) ?? 0;
+            return { id: i.id, name: i.name, price: roundCurrency(price) ?? price, qty };
+          });
+
+      const resolvedSubtotal = roundCurrency(backendSubtotal ?? fallbackNet) ?? fallbackNet;
+      const resolvedVat = roundCurrency(backendVat ?? fallbackVat) ?? fallbackVat;
+      const resolvedTotal = roundCurrency(backendTotal ?? liveCartTotal) ?? liveCartTotal;
+      const snapshotUserId = created?.user?.id ?? created?.user_id ?? (authUser?.id ?? null);
+      const snapshot = {
+        items: snapshotItems,
+        subtotal: resolvedSubtotal,
+        vat: resolvedVat,
+        total: resolvedTotal,
+        ts: Date.now(),
+        backendOrderId: created.id,
+        cartSignature: cartSig,
+        userId: snapshotUserId,
+        paymentStatus: created?.latestPayment?.status ?? created?.paymentStatus ?? null,
+        paymentMethod: created?.latestPayment?.method ?? created?.paymentMethod ?? null
+      };
+      setOrderSnapshot(snapshot);
+      persist({ orderSnapshot: snapshot });
+
+      // Soft-clear cart after successful order creation with a backup for safety
+      if (!hasCartBackup) {
+        try { backupCart(); } catch {}
+      }
+      clearCart();
       return created;
     } catch (e) {
       // Extract probable root cause keywords to show friendlier text
@@ -159,41 +280,93 @@ export default function Checkout() {
 
   // React to successful payment completion
   useEffect(() => {
+    if (mm.payment) {
+      setOrderSnapshot(os => {
+        if (!os) return os;
+        const next = { ...os, paymentStatus: mm.payment.status ?? null, paymentMethod: mm.payment.method ?? os.paymentMethod ?? null };
+        persist({ orderSnapshot: next });
+        return next;
+      });
+    }
+  }, [mm.payment]);
+
+  useEffect(() => {
     if (mm.status === 'succeeded' && !submitted) {
-      // snapshot items and total before clearing cart
-      // Prices already VAT-inclusive. Extract VAT portion: VAT = total - (total / (1+rate))
-      const vatPortion = +(total - (total / (1 + VAT_RATE))).toFixed(2);
-      const net = +(total - vatPortion).toFixed(2);
-      const snapshot = {
-        items: items.map(i => ({ id: i.id, name: i.name, price: i.price, qty: i.qty })),
-        subtotal: net,
-        vat: vatPortion,
-        total: total,
-        ts: Date.now()
-      };
-      setOrderSnapshot(snapshot);
+      // Prefer existing snapshot captured at order creation; fallback to live cart
+      let snapshot = orderSnapshot;
+      const paymentAmount = parseMoney(mm.payment?.amount);
+      if (!snapshot) {
+        const baseTotal = paymentAmount ?? liveCartTotal;
+        const normalizedTotal = roundCurrency(baseTotal) ?? baseTotal;
+        const vatPortion = roundCurrency(normalizedTotal - (normalizedTotal / (1 + VAT_RATE))) ?? 0;
+        const net = roundCurrency(normalizedTotal - vatPortion) ?? normalizedTotal;
+        snapshot = {
+          items: items.map(i => {
+            const qty = Number.isFinite(Number(i.qty)) ? Number(i.qty) : 0;
+            const price = parseMoney(i.price) ?? 0;
+            return { id: i.id, name: i.name, price: roundCurrency(price) ?? price, qty };
+          }),
+          subtotal: net,
+          vat: vatPortion,
+          total: normalizedTotal,
+          ts: Date.now(),
+          cartSignature: buildCartSignature(items),
+          userId: authUser?.id ?? null,
+          paymentStatus: mm.payment?.status ?? 'SUCCESS',
+          paymentMethod: mm.payment?.method ?? null
+        };
+        setOrderSnapshot(snapshot);
+      } else {
+        const normalizedTotal = roundCurrency(paymentAmount ?? snapshot.total ?? liveCartTotal) ?? snapshot.total ?? liveCartTotal;
+        const normalizedSubtotal = snapshot.subtotal != null ? roundCurrency(snapshot.subtotal) ?? snapshot.subtotal : snapshot.subtotal;
+        const normalizedVat = snapshot.vat != null ? roundCurrency(snapshot.vat) ?? snapshot.vat : snapshot.vat;
+        snapshot = {
+          ...snapshot,
+          total: normalizedTotal,
+          subtotal: normalizedSubtotal ?? snapshot.subtotal,
+          vat: normalizedVat ?? snapshot.vat,
+          paymentStatus: mm.payment?.status ?? snapshot.paymentStatus ?? 'SUCCESS',
+          paymentMethod: mm.payment?.method ?? snapshot.paymentMethod ?? null
+        };
+        setOrderSnapshot(snapshot);
+      }
       setStep(3);
       setSubmitted(true);
       persist({ submitted: true, step: 3, paymentRef, orderSnapshot: snapshot });
-      clearCart();
+      // Clear any cart backup since the order/payment is complete
+      try { clearCart(); } catch {}
+      try { clearCartBackup(); } catch {}
       push('Payment successful');
+      setModalOpen(false);
       // store order history
       try {
         const raw = localStorage.getItem('orders');
         const list = raw ? JSON.parse(raw) : [];
         list.unshift({
           orderRef,
-            paymentRef: paymentRef,
-            method: payMethod,
-            snapshot,
-            customer: { name: form.name, phone: form.phone, delivery: form.delivery, address: form.address },
-            createdAt: snapshot.ts
+          paymentRef: paymentRef,
+          method: payMethod,
+          snapshot,
+          customer: { name: form.name, phone: form.phone, delivery: form.delivery, address: form.address },
+          createdAt: snapshot.ts
         });
         localStorage.setItem('orders', JSON.stringify(list.slice(0,50)));
       } catch {}
     }
-    if (mm.status === 'failed') {
-      push('Payment failed', 'error');
+    if (mm.status === 'failed' || mm.status === 'timeout') {
+      const timedOut = mm.payment?.failureReason === 'TIMEOUT_EXPIRED' || mm.status === 'timeout';
+      push(timedOut ? 'Payment attempt expired after 3 minutes. If your mobile money was charged, please contact support.' : 'Payment failed', timedOut ? 'warning' : 'error');
+      // Automatically restore cart on failure if we have a backup
+      try {
+        if (hasCartBackup) {
+          restoreCart();
+          clearCartBackup();
+          push('Cart restored');
+        }
+      } catch {}
+      setOrderSnapshot(null);
+      persist({ orderSnapshot: null });
+      setModalOpen(true);
     }
   }, [mm.status]);
 
@@ -207,7 +380,7 @@ export default function Checkout() {
       ...(form.delivery==='delivery' ? [`Address: ${form.address}`] : []),
       `Payment: ${paymentRef || 'N/A'}`,
       'Items:',
-      ...snap.items.map(i => `  - ${i.name} x${i.qty} = ${formatKES(i.price * i.qty)}`),
+      ...((Array.isArray(snap.items) ? snap.items : items).map(i => `  - ${i.name} x${i.qty} = ${formatKES(i.price * i.qty)}`)),
       `Total: ${formatKES(snap.total)}`
     ].join('\n');
     const blob = new Blob([lines], { type: 'text/plain' });
@@ -221,7 +394,7 @@ export default function Checkout() {
 
   async function exportPdf() {
     // Build snapshot with inclusive VAT extraction if needed
-    let snap = orderSnapshot || { items, total };
+    let snap = (orderSnapshot && Array.isArray(orderSnapshot.items)) ? orderSnapshot : { items, total };
     if (snap && (snap.subtotal == null || snap.vat == null)) {
       const vatPortion = +(snap.total - (snap.total / (1 + VAT_RATE))).toFixed(2);
       const net = +(snap.total - vatPortion).toFixed(2);
@@ -324,7 +497,7 @@ export default function Checkout() {
   }
 
   async function mockEmail() {
-    let snap = orderSnapshot || { items, total };
+    let snap = (orderSnapshot && Array.isArray(orderSnapshot.items)) ? orderSnapshot : { items, total };
     if (snap && (snap.subtotal == null || snap.vat == null)) {
       const vatPortion = +(snap.total - (snap.total / (1 + VAT_RATE))).toFixed(2);
       const net = +(snap.total - vatPortion).toFixed(2);
@@ -341,7 +514,7 @@ export default function Checkout() {
       '',
       'Items:'
     ].filter(Boolean);
-    snap.items.forEach(i => pretty.push(` - ${i.name} x${i.qty} @ ${formatKES(i.price)} = ${formatKES(i.price*i.qty)}`));
+    (Array.isArray(snap.items) ? snap.items : items).forEach(i => pretty.push(` - ${i.name} x${i.qty} @ ${formatKES(i.price)} = ${formatKES(i.price*i.qty)}`));
   pretty.push('', `Net (Excl VAT): ${formatKES(snap.subtotal)}`, `VAT (16%): ${formatKES(snap.vat)}`, `TOTAL (Incl): ${formatKES(snap.total)}`, '', 'Asante!');
     const res = await sendEmailMock({ orderRef, total: snap.total, phone: form.phone, body: pretty.join('\n') });
     if (res.sent) push('Email sent (mock)');
@@ -357,17 +530,41 @@ export default function Checkout() {
   }, [items.length]);
 
   useEffect(() => {
+    if (submitted) return;
+    if (!orderSnapshot?.backendOrderId) return;
+    if (!items.length) return;
+    const liveSig = buildCartSignature(items);
+    const snapshotSig = orderSnapshot.cartSignature ?? buildCartSignature(orderSnapshot.items);
+    if (liveSig !== snapshotSig) {
+      setOrderSnapshot(null);
+      persist({ orderSnapshot: null });
+    }
+  }, [items, submitted, orderSnapshot?.backendOrderId, orderSnapshot?.cartSignature]);
+
+  useEffect(() => {
     let mounted = true;
     (async () => {
       try {
+        const hasActiveItems = (items && items.length > 0) || (orderSnapshot?.items?.length > 0);
+        if (!hasActiveItems) {
+          if (mounted) {
+            setOptionsLoading(false);
+            setPaymentOptions([]);
+          }
+          return;
+        }
         setOptionsLoading(true);
         const opts = await api.payments.options();
         if (mounted) setPaymentOptions(opts);
-      } catch (e) { /* ignore */ }
-      finally { setOptionsLoading(false); }
+      } catch (err) {
+        console.error('Could not load payment options', err);
+        if (mounted) setPaymentOptions([]);
+      } finally {
+        if (mounted) setOptionsLoading(false);
+      }
     })();
     return () => { mounted = false; };
-  }, []);
+  }, [items, orderSnapshot?.items?.length]);
 
   function openOption(opt) {
     setSelectedOption(opt);
@@ -375,12 +572,26 @@ export default function Checkout() {
     setModalAccountRef('');
     setModalOpen(true);
   }
-
   async function initiateFromOption() {
     if (!selectedOption) return;
+    if (['initiating','pending','reconciling'].includes(mm.status)) {
+      push('Payment already in progress. Please wait for confirmation before starting another.', 'warning');
+      return;
+    }
+    if (orderSnapshot?.backendOrderId && ['INITIATED','PENDING'].includes(orderSnapshot?.paymentStatus ?? '')) {
+      push('An order payment is already in progress. Please wait for confirmation or restart checkout to create a new order.', 'warning');
+      return;
+    }
     try {
       // Ensure backend order exists
       let backendOrderId = orderSnapshot?.backendOrderId;
+      const snapshotUserId = orderSnapshot?.userId ?? null;
+      const currentUserId = authUser?.id ?? null;
+      if (backendOrderId && snapshotUserId !== currentUserId) {
+        backendOrderId = null;
+        setOrderSnapshot(null);
+        persist({ orderSnapshot: null });
+      }
       if (!backendOrderId) {
         const created = await ensureBackendOrder();
         if (!created) return;
@@ -392,7 +603,7 @@ export default function Checkout() {
           provider: selectedOption.provider,
           channel: selectedOption.channel,
           method: 'MOBILE_MONEY',
-          amount: Number(total).toFixed(2),
+          amount: formattedSnapshotTotal,
           phoneNumber: modalPhone,
           accountReference: modalAccountRef || undefined,
           supportsStk: true
@@ -403,17 +614,46 @@ export default function Checkout() {
         await api.payments.initiateManual({
           orderId: backendOrderId,
           paymentOptionId: selectedOption.id,
-          amount: Number(total).toFixed(2),
+          amount: formattedSnapshotTotal,
           phoneNumber: modalPhone || undefined,
           accountReference: modalAccountRef || undefined
         });
         // start polling using hook's internal poller by seeding orderId
-        mm.initiate({ orderId: backendOrderId, provider: selectedOption.provider, channel: selectedOption.channel, method: 'MOBILE_MONEY', amount: Number(total).toFixed(2), phoneNumber: modalPhone });
+        mm.initiate({ orderId: backendOrderId, provider: selectedOption.provider, channel: selectedOption.channel, method: 'MOBILE_MONEY', amount: formattedSnapshotTotal, phoneNumber: modalPhone });
       }
-      setModalOpen(false);
     } catch (e) {
       push(e.message || 'Could not start payment', 'error');
     }
+  }
+
+  if (shouldRedirectToCart) {
+    return (
+      <section className="py-5">
+        <div className="container">
+          <div className="row justify-content-center">
+            <div className="col-lg-7">
+              <div className="card shadow-sm border-0">
+                <div className="card-body text-center p-5">
+                  <i className="bi bi-basket2-fill display-4 text-success mb-3" aria-hidden="true"></i>
+                  <h1 className="h4 mb-3">Your cart is empty</h1>
+                  <p className="text-muted mb-4">Add a few items to get started or review your recent orders.</p>
+                  <div className="d-flex flex-column flex-sm-row gap-2 justify-content-center">
+                    <Link to="/" className="btn btn-success d-flex align-items-center justify-content-center gap-1">
+                      <i className="bi bi-shop"></i>
+                      <span>Go Shopping</span>
+                    </Link>
+                    <Link to="/orders" className="btn btn-outline-secondary d-flex align-items-center justify-content-center gap-1">
+                      <i className="bi bi-receipt"></i>
+                      <span>Go to My Orders</span>
+                    </Link>
+                  </div>
+                </div>
+              </div>
+            </div>
+          </div>
+        </div>
+      </section>
+    );
   }
 
   if (submitted && step === 3) {
@@ -528,13 +768,14 @@ export default function Checkout() {
               <div className="d-flex flex-wrap gap-2 mb-3">
                 {paymentOptions.map(opt => {
                   const b = paymentBranding[opt.provider] || { color:'#222', bg:'#eee' };
+                  const subtitle = opt.shortDescription || summarizeInstructions(opt.instructionsMarkdown) || opt.channel;
                   return (
                     <button key={opt.id} type="button" onClick={()=>openOption(opt)} className="btn btn-light border position-relative" style={{minWidth:180, textAlign:'left'}}>
                       <span className="d-flex align-items-center gap-2">
                         <span style={{width:26,height:26,background:b.color,color:'#fff',borderRadius:6,fontSize:12,fontWeight:600,display:'flex',alignItems:'center',justifyContent:'center'}}>{opt.provider[0]}</span>
                         <span className="d-flex flex-column">
                           <strong className="small mb-0" style={{color:b.color}}>{opt.displayName}</strong>
-                          <span className="text-muted small" style={{lineHeight:1.1}}>{opt.shortDescription || opt.channel}</span>
+                          <span className="text-muted small" style={{lineHeight:1.1}}>{subtitle}</span>
                         </span>
                       </span>
                       {opt.supportsStk && <span className="badge bg-success position-absolute top-0 end-0 m-1" style={{fontSize:'0.6rem'}}>STK</span>}
@@ -559,15 +800,20 @@ export default function Checkout() {
         <div className="col-12 col-lg-5">
           <div className="border rounded p-3 bg-body">
             <h2 className="h6">Summary</h2>
-            <ul className="list-unstyled small mb-2">
-              {items.map(i => (
+            {(() => {
+              const snap = (orderSnapshot && Array.isArray(orderSnapshot.items)) ? orderSnapshot : { items, total };
+              return (
+                <ul className="list-unstyled small mb-2">
+                  {(Array.isArray(snap.items) ? snap.items : items).map(i => (
                 <li key={i.id} className="d-flex justify-content-between border-bottom py-1">
                   <span>{i.name} × {i.qty}</span>
                   <span>{formatKES(i.price * i.qty)}</span>
                 </li>
-              ))}
-            </ul>
-            <p className="fw-semibold mb-0">Total: {formatKES(total)}</p>
+                  ))}
+                </ul>
+              );
+            })()}
+            <p className="fw-semibold mb-0">Total: {formatKES((orderSnapshot?.total) ?? total)}</p>
           </div>
         </div>
       </div>
@@ -584,15 +830,15 @@ export default function Checkout() {
             await mm.reconcile({ orderId: backendOrderId, provider: selectedOption.provider, phoneNumber: phone || undefined, amount: amountVal ? Number(amountVal) : undefined });
           } catch {/* handled in hook */}
         }}
-        reconciling={mm.status==='reconciling'}
-        paymentStatus={mm.payment?.status}
-        loading={mm.status==='initiating' || mm.status==='pending'}
-        paymentHookStatus={mm.status}
+  reconciling={modalPaymentState==='reconciling'}
+  paymentStatus={effectivePaymentStatus}
+  loading={modalPaymentState==='initiating'}
+  paymentHookStatus={modalPaymentState}
         phone={modalPhone}
         setPhone={setModalPhone}
         accountRef={modalAccountRef}
         setAccountRef={setModalAccountRef}
-        amount={Number(total).toFixed(2)}
+        amount={formattedSnapshotTotal}
       />
     </section>
   );

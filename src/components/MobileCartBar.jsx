@@ -24,8 +24,7 @@ export default function MobileCartBar(){
       <div className="flex-grow-1 small">
         <strong>{count}</strong> item{count!==1 && 's'} • {formatCurrency(total)}
       </div>
-      <Link to="/cart" className="btn btn-outline-primary btn-sm">View Cart</Link>
-      <Link to="/checkout" className="btn btn-success btn-sm">Checkout</Link>
+  <Link to="/cart" className="btn btn-success btn-sm">Review Cart</Link>
     </div>
   );
 }

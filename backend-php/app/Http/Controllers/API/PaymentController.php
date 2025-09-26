@@ -16,6 +16,10 @@ class PaymentController extends Controller
     // Generic create or fetch (idempotent by order)
     public function create(Request $request)
     {
+        // Normalize camelCase fields from frontend to snake_case for validation
+        $request->merge([
+            'order_id' => $request->input('order_id') ?? $request->input('orderId'),
+        ]);
         $data = $request->validate([
             'order_id' => 'required|integer|exists:orders,id',
             'method' => 'nullable|string|max:32'
@@ -27,6 +31,12 @@ class PaymentController extends Controller
     // Automated (STK / provider) initiation
     public function initiateMobileMoney(Request $request)
     {
+        // Normalize camelCase fields from frontend to snake_case for validation
+        $request->merge([
+            'order_id' => $request->input('order_id') ?? $request->input('orderId'),
+            'phone_number' => $request->input('phone_number') ?? $request->input('phoneNumber'),
+            'supports_stk' => $request->input('supports_stk') ?? $request->input('supportsStk'),
+        ]);
         $data = $request->validate([
             'order_id' => 'required|integer|exists:orders,id',
             'provider' => 'required|string|in:MPESA,AIRTEL',
@@ -43,6 +53,13 @@ class PaymentController extends Controller
     // Manual mobile money referencing PaymentOption
     public function initiateManual(Request $request)
     {
+        // Normalize camelCase fields from frontend to snake_case for validation
+        $request->merge([
+            'order_id' => $request->input('order_id') ?? $request->input('orderId'),
+            'payment_option_id' => $request->input('payment_option_id') ?? $request->input('paymentOptionId'),
+            'phone_number' => $request->input('phone_number') ?? $request->input('phoneNumber'),
+            'account_reference' => $request->input('account_reference') ?? $request->input('accountReference'),
+        ]);
         $data = $request->validate([
             'order_id' => 'required|integer|exists:orders,id',
             'payment_option_id' => 'required|integer|exists:payment_options,id',
@@ -57,6 +74,12 @@ class PaymentController extends Controller
 
     public function reconcileManual(Request $request)
     {
+        // Normalize camelCase fields from frontend to snake_case for validation
+        $request->merge([
+            'payment_id' => $request->input('payment_id') ?? $request->input('paymentId'),
+            'order_id' => $request->input('order_id') ?? $request->input('orderId'),
+            'phone_number' => $request->input('phone_number') ?? $request->input('phoneNumber'),
+        ]);
         $data = $request->validate([
             'payment_id' => 'nullable|integer|exists:payments,id',
             'order_id' => 'nullable|integer|exists:orders,id',

@@ -256,7 +256,6 @@ export default function AdminProducts() {
                 <input name="unit" value={form.unit} onChange={handleChange} className="form-control" placeholder="Unit (e.g. kg, pc)" />
                 <textarea name="description" value={form.description} onChange={handleChange} className="form-control" placeholder="Description" rows={2}></textarea>
                 <input type="number" min="0" name="stock" value={form.stock} onChange={handleChange} className="form-control" placeholder="Stock" />
-                <input key={editingId || 'new'} type="file" accept="image/*" onChange={e=>setImageFile(e.target.files?.[0] || null)} className="form-control" />
                 {editingId && (
                   <div className="mt-3 border rounded p-2">
                     <div className="d-flex justify-content-between align-items-center mb-2">

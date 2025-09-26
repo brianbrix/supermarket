@@ -63,6 +63,10 @@ export const api = {
   products: {
     list: (page=0,size=10) => request(`/products?page=${page}&size=${size}`),
     get: (id) => request(`/products/${id}`),
+    priceRange: (categoryId) => {
+      const qs = categoryId ? `?categoryId=${encodeURIComponent(categoryId)}` : '';
+      return request(`/products/price-range${qs}`);
+    },
     byCategory: (cat) => request(`/products/category/${encodeURIComponent(cat)}`),
     search: ({ q, categoryId, minPrice, maxPrice, inStock, page=0, size=10 } = {}) => {
       const params = new URLSearchParams();
@@ -191,11 +195,11 @@ export const api = {
           // Support pagination if backend implements it; fallback gracefully if not.
           const params = new URLSearchParams();
           params.set('page', page); params.set('size', size);
-          return request(`/admin/payments/options?${params.toString()}`);
+          return request(`/admin/payment-options?${params.toString()}`);
         },
-        create: (payload) => request('/admin/payments/options', { method:'POST', body: JSON.stringify(payload)}),
-        update: (id,payload) => request(`/admin/payments/options/${id}`, { method:'PUT', body: JSON.stringify(payload)}),
-        delete: (id) => request(`/admin/payments/options/${id}`, { method:'DELETE' })
+        create: (payload) => request('/admin/payment-options', { method:'POST', body: JSON.stringify(payload)}),
+        update: (id,payload) => request(`/admin/payment-options/${id}`, { method:'PUT', body: JSON.stringify(payload)}),
+        delete: (id) => request(`/admin/payment-options/${id}`, { method:'DELETE' })
       }
     },
     categories: {

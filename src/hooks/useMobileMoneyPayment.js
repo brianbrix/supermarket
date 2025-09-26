@@ -7,7 +7,9 @@ import { api } from '../services/api.js';
  *  - call initiate({ orderId, provider, channel, method, amount, phoneNumber })
  *  - hook will start polling (default 3s interval) until SUCCESS/FAILED or timeout
  */
-export function useMobileMoneyPayment({ pollIntervalMs = 3000, timeoutMs = 120000 } = {}) {
+const DEFAULT_TIMEOUT_MS = 3 * 60 * 1000; // 3 minutes
+
+export function useMobileMoneyPayment({ pollIntervalMs = 3000, timeoutMs = DEFAULT_TIMEOUT_MS } = {}) {
   const [state, setState] = useState({ status: 'idle', error: null, payment: null });
   const timeoutRef = useRef();
   const pollRef = useRef();
@@ -48,7 +50,17 @@ export function useMobileMoneyPayment({ pollIntervalMs = 3000, timeoutMs = 12000
       setTimeout(poll, 1000);
       timeoutRef.current = setTimeout(() => {
         clearTimers();
-        setState(s => ({ ...s, status: 'timeout' }));
+        setState(s => {
+          const elapsed = Date.now() - (startedAtRef.current || Date.now());
+          const nextPayment = s.payment ? { ...s.payment, status: 'FAILED', failureReason: 'TIMEOUT_EXPIRED', timeoutElapsedMs: elapsed } : {
+            orderId: orderIdRef.current,
+            status: 'FAILED',
+            failureReason: 'TIMEOUT_EXPIRED',
+            timeoutElapsedMs: elapsed
+          };
+          orderIdRef.current = undefined;
+          return { ...s, status: 'failed', payment: nextPayment };
+        });
       }, timeoutMs);
       return resp;
     } catch (e) {

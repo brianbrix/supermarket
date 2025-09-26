@@ -32,12 +32,40 @@ export function PaymentOptionModal({ option, open, onClose, onInitiate, onReconc
     }
   }, [phone, manualPhoneDirty]);
   useEffect(() => {
-    if (open && dialogRef.current) {
+    if (!dialogRef.current) return;
+    if (open && !dialogRef.current.open) {
       dialogRef.current.showModal();
-    } else if (!open && dialogRef.current?.open) {
+    }
+    if (!open && dialogRef.current.open) {
       dialogRef.current.close();
     }
   }, [open]);
+
+  const lockingStatuses = ['initiating','pending','reconciling'];
+  const inProgress = lockingStatuses.includes(paymentHookStatus) || (paymentStatus === 'INITIATED' && paymentHookStatus !== 'failed');
+  const statusMessage = (() => {
+    if (paymentHookStatus === 'initiating') return 'Contacting the payment provider…';
+    if (paymentHookStatus === 'pending') return 'Waiting for confirmation. Check your phone to approve the request.';
+    if (paymentHookStatus === 'reconciling') return 'Confirming payment…';
+    if (paymentHookStatus === 'timeout') return 'Payment timed out. You can try reconciling or restart the checkout.';
+    if (paymentHookStatus === 'failed') return 'Payment failed. Please create a new order to try again.';
+    if (paymentHookStatus === 'succeeded') return 'Payment confirmed!';
+    if (paymentHookStatus === 'error') return 'Could not initiate payment. Please check details and try again.';
+    return null;
+  })();
+
+  const handleCancel = (event) => {
+    if (inProgress) {
+      event.preventDefault();
+      return;
+    }
+    onClose();
+  };
+
+  const handleCloseClick = () => {
+    if (inProgress) return;
+    onClose();
+  };
 
   if (!option) return null;
   const branding = paymentBranding[option.provider] || { color:'#222', bg:'#f5f5f5', logoText: option.provider };
@@ -57,7 +85,7 @@ export function PaymentOptionModal({ option, open, onClose, onInitiate, onReconc
   const instructions = option.instructionsMarkdown ? renderMarkdown(applyTemplate(option.instructionsMarkdown, vars)) : '';
 
   return (
-    <dialog ref={dialogRef} className="payment-option-modal" onCancel={onClose}>
+    <dialog ref={dialogRef} className="payment-option-modal" onCancel={handleCancel}>
       <div className="pom-surface border-0 p-0" style={{minWidth:'min(500px, 92vw)'}}>
         <div style={{borderBottom:`2px solid ${branding.color}`}} className="pom-header p-3 d-flex align-items-center gap-2">
           {branding.logo ? (
@@ -71,9 +99,21 @@ export function PaymentOptionModal({ option, open, onClose, onInitiate, onReconc
             <h2 className="h6 mb-0" style={{color:branding.color}}>{option.displayName}</h2>
             <p className="small mb-0 text-muted">{option.shortDescription || option.channel}</p>
           </div>
-          <button type="button" className="btn-close ms-auto" aria-label="Close" onClick={onClose}></button>
+          <button type="button" className="btn-close ms-auto" aria-label="Close" onClick={handleCloseClick} disabled={inProgress}></button>
         </div>
         <div className="p-3 pom-body">
+          {statusMessage && (
+            <div className={`alert ${inProgress ? 'alert-warning' : paymentHookStatus === 'succeeded' ? 'alert-success' : 'alert-info'} py-2 small`}> 
+              <div className="d-flex align-items-start gap-2">
+                {inProgress && <span className="spinner-border spinner-border-sm text-warning"></span>}
+                <div>
+                  <strong className="d-block">{inProgress ? 'Payment in progress' : 'Payment update'}</strong>
+                  <span>{statusMessage}</span>
+                  {inProgress && <span className="d-block text-muted">Don’t refresh or close this page until confirmation completes.</span>}
+                </div>
+              </div>
+            </div>
+          )}
           <form onSubmit={(e)=>{ e.preventDefault(); onInitiate(); }} className="d-flex flex-column gap-3">
             <div>
               <label className="form-label small">Phone Number</label>
@@ -88,8 +128,8 @@ export function PaymentOptionModal({ option, open, onClose, onInitiate, onReconc
             )}
             {supportsStk && <div className="alert alert-info py-2 small mb-0">A prompt will appear on your phone after you click Continue.<br/> Enter you PIN and send.</div>}
             <div className="d-flex gap-2 justify-content-end border-bottom pb-3 mb-2">
-              <button type="button" className="btn btn-outline-secondary" onClick={onClose}>Cancel</button>
-              <button type="submit" disabled={loading} className="btn btn-success">{loading ? 'Processing…' : (supportsStk ? 'Continue' : 'Record Payment')}</button>
+              <button type="button" className="btn btn-outline-secondary" onClick={handleCloseClick} disabled={inProgress}>Cancel</button>
+              <button type="submit" disabled={loading || inProgress} className="btn btn-success">{(loading || inProgress) ? 'Processing…' : (supportsStk ? 'Continue' : 'Record Payment')}</button>
             </div>
             {instructions && (
               <div className="slide-up">

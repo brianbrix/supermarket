@@ -21,28 +21,23 @@ export default function Home() {
   // Track when the initial baseline (categories + first page) has finished loading
   const [baselineLoaded, setBaselineLoaded] = useState(false);
 
-  // Initial load for categories & baseline products
+  // Initial load for categories, baseline products, and global price bounds from backend
   useEffect(() => {
     let active = true;
-    Promise.all([api.categories.list(), api.products.list(page, size)])
-      .then(([cats, pageResp]) => {
+    Promise.all([api.categories.list(), api.products.list(page, size), api.products.priceRange()])
+      .then(([cats, pageResp, range]) => {
         if (!active) return;
         const catOptions = cats.map(c => ({ id: c.id, name: c.name }));
         setCategories(catOptions);
         const mapped = pageResp.content.map(mapProductResponse);
         setResults(mapped);
         setPageMeta(pageResp);
-        const prices = mapped.map(p => p.price);
-        const min = prices.length ? Math.min(...prices) : 0;
-        const max = prices.length ? Math.max(...prices) : 0;
-        // Set bounds & range before enabling search effect
+        const min = Number(range?.min ?? 0);
+        const max = Number(range?.max ?? 0);
         setSliderBounds({ min, max });
         setPriceRange({ min, max });
-        // Always skip the first search; we've just loaded the baseline list
         initialSearchSkippedRef.current = true;
-        lastSearchKeyRef.current = JSON.stringify({
-          q: '', cat: 'all', min, max, stock: 0, page: 0
-        });
+        lastSearchKeyRef.current = JSON.stringify({ q: '', cat: 'all', min, max, stock: 0, page: 0 });
         setBaselineLoaded(true);
         setLoading(false);
       })
@@ -55,6 +50,26 @@ export default function Home() {
   const debouncedRange = useDebounce(priceRange, 400);
   const debouncedInStock = useDebounce(inStockOnly, 300);
   const debouncedCategory = useDebounce(categoryId, 300);
+
+  // Update slider bounds when category changes using backend priceRange
+  useEffect(() => {
+    let active = true;
+    const catId = debouncedCategory !== 'all' ? debouncedCategory : undefined;
+    api.products.priceRange(catId)
+      .then(range => {
+        if (!active) return;
+        const min = Number(range?.min ?? 0);
+        const max = Number(range?.max ?? 0);
+        setSliderBounds({ min, max });
+        // If current priceRange is outside new bounds, clamp it but preserve user intent
+        setPriceRange(prev => ({
+          min: Math.max(min, Math.min(prev.min, max)),
+          max: Math.min(max, Math.max(prev.max, min))
+        }));
+      })
+      .catch(() => {/* ignore bounds errors; keep previous bounds */});
+    return () => { active = false; };
+  }, [debouncedCategory]);
 
   // Prevent double fetch + flicker: run search only after initial baseline load AND when filters actually change.
   const initialSearchSkippedRef = useRef(false);

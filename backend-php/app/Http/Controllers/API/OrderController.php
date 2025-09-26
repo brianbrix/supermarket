@@ -13,18 +13,60 @@ use Illuminate\Support\Facades\Auth;
 class OrderController extends Controller
 {
     public function index(Request $request) {
-        $query = Order::query()->with(['items.product']);
-        if (Auth::check()) {
-            $query->where('user_id', Auth::id());
+        $query = Order::query()->with(['items.product','latestPayment']);
+        // Prefer Sanctum token user; fallback to default guard if present
+        $authUser = $request->user('sanctum') ?? Auth::user();
+        if ($authUser) {
+            $query->where('user_id', $authUser->id);
         }
         $paginator = $query->orderByDesc('id')->paginate(min(100,(int)$request->get('size',20)));
+        $content = $paginator->getCollection()->map(function (Order $order) {
+            $latest = $order->latestPayment;
+            return [
+                'id' => $order->id,
+                'customerName' => $order->customer_name,
+                'customerPhone' => $order->customer_phone,
+                'status' => $order->status,
+                'totalGross' => (float)$order->total_gross,
+                'totalNet' => (float)$order->total_net,
+                'vatAmount' => (float)$order->vat_amount,
+                'createdAt' => optional($order->created_at)->toIso8601String(),
+                'updatedAt' => optional($order->updated_at)->toIso8601String(),
+                'paymentStatus' => $latest?->status,
+                'paymentMethod' => $latest?->method,
+                'paymentProgress' => $latest ? [
+                    'id' => $latest->id,
+                    'status' => $latest->status,
+                    'method' => $latest->method,
+                    'provider' => $latest->provider,
+                    'channel' => $latest->channel,
+                    'amount' => (float)$latest->amount,
+                    'createdAt' => optional($latest->created_at)->toIso8601String(),
+                    'updatedAt' => optional($latest->updated_at)->toIso8601String(),
+                    'externalRequestId' => $latest->external_request_id,
+                    'externalTransactionId' => $latest->external_transaction_id,
+                ] : null,
+                'items' => $order->items->map(function (OrderItem $item) {
+                    return [
+                        'id' => $item->id,
+                        'productId' => $item->product_id,
+                        'productName' => $item->product->name ?? $item->product_name ?? '',
+                        'quantity' => (int)$item->quantity,
+                        'unitPriceGross' => (float)$item->unit_price_gross,
+                        'unitPriceNet' => (float)$item->unit_price_net,
+                        'vatAmount' => (float)$item->vat_amount,
+                    ];
+                })->values()->all(),
+            ];
+        })->values()->all();
+
         return response()->json([
-            'content' => $paginator->items(),
+            'content' => $content,
             'page' => $paginator->currentPage()-1,
             'size' => $paginator->perPage(),
             'totalPages' => $paginator->lastPage(),
             'totalElements' => $paginator->total(),
-            'numberOfElements' => count($paginator->items()),
+            'numberOfElements' => count($content),
             'first' => $paginator->currentPage()===1,
             'last' => $paginator->currentPage()===$paginator->lastPage(),
         ]);
@@ -36,6 +78,11 @@ class OrderController extends Controller
     }
 
     public function store(Request $request) {
+        // accept both camelCase and snake_case just in case
+        $request->merge([
+            'customer_name' => $request->input('customer_name') ?? $request->input('customerName'),
+            'customer_phone' => $request->input('customer_phone') ?? $request->input('customerPhone'),
+        ]);
         $data = $request->validate([
             'customerName' => 'required|string|max:255',
             'customerPhone' => 'required|string|max:32',
@@ -45,13 +92,14 @@ class OrderController extends Controller
         ]);
 
         $vatRate = 0.16; // Align with frontend constant
-        return DB::transaction(function() use ($data, $vatRate) {
+        return DB::transaction(function() use ($data, $vatRate, $request) {
             $grossTotal = 0; $netTotal = 0; $vatTotal = 0;
+            $authUser = $request->user('sanctum') ?? Auth::user();
             $order = Order::create([
                 'customer_name' => $data['customerName'],
                 'customer_phone' => $data['customerPhone'],
                 'status' => 'PENDING',
-                'user_id' => Auth::id(),
+                'user_id' => $authUser?->id,
                 'total_gross' => 0,
                 'total_net' => 0,
                 'vat_amount' => 0,

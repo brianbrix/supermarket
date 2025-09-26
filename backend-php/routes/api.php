@@ -8,6 +8,7 @@ use App\Http\Controllers\API\CategoryController;
 use App\Http\Controllers\Admin\DashboardAdminController;
 use App\Http\Controllers\Admin\AnalyticsAdminController;
 use App\Http\Controllers\Admin\ProductAdminController;
+use App\Http\Controllers\Admin\CategoryAdminController;
 use App\Http\Controllers\Admin\PaymentOptionAdminController;
 use App\Http\Controllers\API\PaymentController;
 use App\Http\Controllers\API\OrderController;
@@ -16,6 +17,7 @@ use App\Http\Controllers\Admin\AnalyticsExtraController;
 use App\Http\Controllers\Auth\AuthController;
 
 Route::get('/products', [ProductController::class, 'index']);
+Route::get('/products/price-range', [ProductController::class, 'priceRange']);
 Route::get('/products/search', [ProductController::class, 'search']);
 Route::get('/products/{product}', [ProductController::class, 'show'])->whereNumber('product');
 Route::get('/products/category/{category}', [ProductController::class, 'byCategory']);
@@ -51,34 +53,6 @@ Route::middleware('auth:sanctum')->group(function () {
     Route::post('/products/{product}/images', [\App\Http\Controllers\Admin\ProductImageController::class, 'storeMany']);
     Route::delete('/products/{product}/images/{image}', [\App\Http\Controllers\Admin\ProductImageController::class, 'destroy']);
 
-    // Temporary diagnostic endpoint – REMOVE in production.
-    Route::get('/debug/storage', function() {
-        $publicStorageLink = public_path('storage');
-        $isLink = is_link($publicStorageLink);
-        $linkTarget = $isLink ? readlink($publicStorageLink) : null;
-        $latest = \App\Models\ProductImage::latest()->first();
-        $relative = null; $diskExists = null; $publicExists = null;
-        if ($latest) {
-            $relative = ltrim(str_replace('/storage','',$latest->url), '/');
-            $diskExists = \Illuminate\Support\Facades\Storage::disk('public')->exists($relative);
-            $publicExists = file_exists(public_path('storage/'.$relative));
-        }
-        return response()->json([
-            'symlink' => [
-                'path' => $publicStorageLink,
-                'exists' => file_exists($publicStorageLink),
-                'isLink' => $isLink,
-                'target' => $linkTarget,
-            ],
-            'latestImageRecord' => $latest ? $latest->only(['id','product_id','url']) : null,
-            'latestImagePath' => [
-                'relative' => $relative,
-                'diskExists' => $diskExists,
-                'publicExists' => $publicExists,
-            ],
-            'app_url' => env('APP_URL'),
-        ]);
-    });
 });
 
 Route::middleware(['auth:sanctum','role:ADMIN'])->prefix('admin')->group(function () {
@@ -105,9 +79,20 @@ Route::middleware(['auth:sanctum','role:ADMIN'])->prefix('admin')->group(functio
     Route::get('/payments/options', [PaymentOptionAdminController::class, 'index']); // alias path to satisfy frontend
     Route::post('/payment-options', [PaymentOptionAdminController::class, 'store']);
     Route::put('/payment-options/{paymentOption}', [PaymentOptionAdminController::class, 'update']);
+    Route::delete('/payment-options/{paymentOption}', [PaymentOptionAdminController::class, 'destroy']);
     Route::post('/payment-options/{paymentOption}/activate', [PaymentOptionAdminController::class, 'activate']);
     Route::post('/payment-options/{paymentOption}/deactivate', [PaymentOptionAdminController::class, 'deactivate']);
+
+    // Full alias set under /admin/payments/options for existing frontend expectations
+    Route::get('/payments/options', [PaymentOptionAdminController::class, 'index']);
+    Route::post('/payments/options', [PaymentOptionAdminController::class, 'store']);
+    Route::put('/payments/options/{paymentOption}', [PaymentOptionAdminController::class, 'update']);
+    Route::delete('/payments/options/{paymentOption}', [PaymentOptionAdminController::class, 'destroy']);
     // Category mutations (restricted)
+    // Read endpoints for admin UI (paged + search)
+    Route::get('/categories', [CategoryAdminController::class, 'index']);
+    Route::get('/categories/search', [CategoryAdminController::class, 'search']);
+    // Write endpoints
     Route::post('/categories', [CategoryController::class, 'store']);
     Route::put('/categories/{category}', [CategoryController::class, 'update']);
     Route::delete('/categories/{category}', [CategoryController::class, 'destroy']);

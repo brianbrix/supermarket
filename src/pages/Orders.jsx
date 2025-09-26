@@ -1,8 +1,10 @@
-import { useEffect, useState, useRef } from 'react';
+import { useEffect, useState, useRef, useCallback } from 'react';
 import { useAuth } from '../context/AuthContext.jsx';
 import { api } from '../services/api.js';
 import { formatKES } from '../utils/currency.js';
 import PaginationBar from '../components/PaginationBar.jsx';
+
+const PAYMENT_TIMEOUT_MS = 3 * 60 * 1000;
 
 export default function Orders(){
   const [orders, setOrders] = useState([]);
@@ -10,62 +12,110 @@ export default function Orders(){
   const [page, setPage] = useState(0);
   const [size, setSize] = useState(10);
   const { isAuthenticated } = useAuth();
-  useEffect(()=>{
-    let active = true;
-    const mapBackend = (list)=> list.map(o => ({
-      id: o.id,
-      orderRef: o.id || String(o.id),
-      createdAt: o.createdAt || Date.now(),
-      paymentStatus: o.paymentStatus || null,
-      paymentMethod: o.paymentMethod || null,
-      snapshot: {
-        items: (o.items || []).map(i => ({ id: i.productId, name: i.productName, price: i.unitPriceGross || 0, qty: i.quantity || 1 })),
-        subtotal: o.totalNet || 0,
-        vat: o.vatAmount || 0,
-        total: o.totalGross || 0
-      },
-      customer: { name: o.customerName || 'Customer', phone: o.customerPhone || '', delivery: 'pickup', address: '' }
+  const mapBackend = useCallback((list = []) => list.map(o => {
+    const items = Array.isArray(o.items) ? o.items : [];
+    const mappedItems = items.map(i => ({
+      id: i.productId ?? i.id,
+      name: i.productName ?? i.name ?? (i.product?.name ?? 'Item'),
+      price: Number(i.unitPriceGross ?? i.unitPrice ?? i.price ?? 0),
+      qty: Number(i.quantity ?? i.qty ?? 1)
     }));
-
-    const loadGuest = () => {
-      try {
-        const raw = localStorage.getItem('guestOrders');
-        const parsed = raw ? JSON.parse(raw) : [];
-        if(active) setOrders(parsed);
-      } catch { if(active) setOrders([]); }
-    };
-
-    const loadAuth = async () => {
-      try {
-        const pageResp = await api.user.orders(page, size);
-        if(!active) return;
-        const list = Array.isArray(pageResp) ? pageResp : (pageResp.content || []);
-        setOrders(mapBackend(list));
-        if (!Array.isArray(pageResp)) {
-          setMeta({
-            page: pageResp.page,
-            size: pageResp.size,
-            totalElements: pageResp.totalElements,
-            totalPages: pageResp.totalPages,
-            first: pageResp.first,
-            last: pageResp.last
-          });
-        } else {
-          setMeta(m => ({ ...m, page, size, totalElements: list.length, totalPages:1, first:true, last:true }));
-        }
-      } catch (e) {
-        loadGuest();
+    const baseProgress = o.paymentProgress ? { ...o.paymentProgress } : null;
+    const now = Date.now();
+    let paymentStatus = baseProgress?.status || o.paymentStatus || null;
+    const lastUpdateIso = baseProgress?.updatedAt || o.paymentUpdatedAt || o.updatedAt || o.createdAt;
+    const lastUpdateMs = lastUpdateIso ? new Date(lastUpdateIso).getTime() : null;
+    const timedOut = ['INITIATED', 'PENDING'].includes(paymentStatus ?? '') && lastUpdateMs && (now - lastUpdateMs >= PAYMENT_TIMEOUT_MS);
+    if (timedOut) {
+      paymentStatus = 'FAILED';
+    }
+    const paymentProgress = baseProgress
+      ? { ...baseProgress, status: paymentStatus, timedOut }
+      : (timedOut ? {
+          status: paymentStatus,
+          timedOut,
+          amount: Number(o.totalGross ?? o.total_gross ?? 0),
+          updatedAt: lastUpdateIso
+        } : null);
+    return {
+      id: o.id,
+      orderRef: o.id ?? String(o.id),
+      createdAt: o.createdAt ? new Date(o.createdAt).getTime() : Date.now(),
+      paymentStatus,
+      paymentMethod: paymentProgress?.method || o.paymentMethod || null,
+      paymentProgress,
+      timedOutPayment: timedOut,
+      snapshot: {
+        items: mappedItems,
+        subtotal: Number(o.totalNet ?? o.total_net ?? 0),
+        vat: Number(o.vatAmount ?? o.vat_amount ?? 0),
+        total: Number(o.totalGross ?? o.total_gross ?? mappedItems.reduce((sum, i) => sum + i.price * i.qty, 0))
+      },
+      customer: {
+        name: o.customerName || o.customer_name || 'Customer',
+        phone: o.customerPhone || o.customer_phone || '',
+        delivery: 'pickup',
+        address: ''
       }
     };
+  }), []);
 
-  if (isAuthenticated) loadAuth(); else loadGuest();
+  const loadGuest = useCallback(() => {
+    try {
+      const raw = localStorage.getItem('orders') ?? localStorage.getItem('guestOrders');
+      const parsed = raw ? JSON.parse(raw) : [];
+      setOrders(mapBackend(parsed));
+      setMeta(m => ({ ...m, page:0, size: parsed.length || size, totalElements: parsed.length, totalPages: 1, first:true, last:true }));
+    } catch {
+      setOrders([]);
+    }
+  }, [mapBackend, size]);
 
+  const loadAuth = useCallback(async () => {
+    try {
+      const pageResp = await api.user.orders(page, size);
+      const list = Array.isArray(pageResp) ? pageResp : (pageResp.content || []);
+      setOrders(mapBackend(list));
+      if (!Array.isArray(pageResp)) {
+        setMeta({
+          page: pageResp.page,
+          size: pageResp.size,
+          totalElements: pageResp.totalElements,
+          totalPages: pageResp.totalPages,
+          first: pageResp.first,
+          last: pageResp.last
+        });
+      } else {
+        setMeta(m => ({ ...m, page, size, totalElements: list.length, totalPages:1, first:true, last:true }));
+      }
+    } catch {
+      loadGuest();
+    }
+  }, [page, size, mapBackend, loadGuest]);
+
+  useEffect(() => {
+    if (isAuthenticated) {
+      loadAuth();
+    } else {
+      loadGuest();
+    }
+  }, [isAuthenticated, page, size, loadAuth, loadGuest]);
+
+  useEffect(() => {
     const storageHandler = (e) => {
-      if (e.key === 'guestOrders' && !isAuthenticated) loadGuest();
+      if (!isAuthenticated && (e.key === 'orders' || e.key === 'guestOrders')) loadGuest();
     };
     window.addEventListener('storage', storageHandler);
-    return ()=>{ active=false; window.removeEventListener('storage', storageHandler); };
-  }, [isAuthenticated, page, size]);
+    return () => window.removeEventListener('storage', storageHandler);
+  }, [isAuthenticated, loadGuest]);
+
+  useEffect(() => {
+    if (!isAuthenticated) return;
+    const hasPending = orders.some(o => ['INITIATED','PENDING'].includes(o.paymentStatus));
+    if (!hasPending) return;
+    const interval = setInterval(() => { loadAuth(); }, 5000);
+    return () => clearInterval(interval);
+  }, [orders, isAuthenticated, loadAuth]);
 
   const [selected, setSelected] = useState(null);
   const closeBtnRef = useRef(null);
@@ -77,6 +127,7 @@ export default function Orders(){
     if(!isAuthenticated) return <span className="badge bg-secondary">—</span>;
     const st = order.paymentStatus;
     if(!st) return <span className="badge bg-secondary">None</span>;
+    const pending = ['INITIATED','PENDING'].includes(st);
     const cls = {
       INITIATED: 'bg-warning text-dark',
       PENDING: 'bg-warning text-dark',
@@ -84,7 +135,24 @@ export default function Orders(){
       FAILED: 'bg-danger',
       CANCELLED: 'bg-secondary'
     }[st] || 'bg-secondary';
-    return <span className={`badge ${cls}`}>{st}</span>;
+    return (
+      <span className={`badge ${cls} d-inline-flex align-items-center gap-1`}>
+        {pending && <span className="spinner-border spinner-border-sm"></span>}
+        {st}
+      </span>
+    );
+  }
+
+  function paymentSubtext(order) {
+    if (!isAuthenticated) return null;
+    if (order.timedOutPayment) return 'Payment attempt expired after 3 minutes';
+    if (!order.paymentProgress) return order.paymentMethod ? order.paymentMethod : null;
+    const { provider, channel, updatedAt } = order.paymentProgress;
+    const parts = [];
+    if (provider) parts.push(provider);
+    if (channel) parts.push(channel);
+    if (updatedAt) parts.push(`updated ${new Date(updatedAt).toLocaleTimeString()}`);
+    return parts.join(' • ');
   }
 
   if (!orders.length) return <section className="container py-3"><h1 className="h5 mb-3">Order History</h1><p className="text-muted">No previous orders yet.{!isAuthenticated && ' (Guest orders are stored locally during this session)'}</p></section>;
@@ -104,7 +172,12 @@ export default function Orders(){
                 <td>{o.orderRef}</td>
                 <td>{new Date(o.createdAt).toLocaleString()}</td>
                 <td>{totalItems(o)}</td>
-                <td>{statusBadge(o)}</td>
+                <td>
+                  <div className="d-flex flex-column">
+                    {statusBadge(o)}
+                    {paymentSubtext(o) && <span className="small text-muted mt-1">{paymentSubtext(o)}</span>}
+                  </div>
+                </td>
                 <td className="text-end">{formatKES(o.snapshot.total)}</td>
                 <td>
                   <button className="btn btn-link p-0 small" onClick={()=>openOrder(o)} aria-label={`View details for order ${o.orderRef}`}>View</button>
@@ -136,6 +209,27 @@ export default function Orders(){
                 <p className="small mb-1"><strong>Date:</strong> {new Date(selected.createdAt).toLocaleString()}</p>
                 <p className="small mb-1"><strong>Total:</strong> {formatKES(selected.snapshot.total)}</p>
                 <p className="small mb-1"><strong>Payment Status:</strong> {statusBadge(selected)} {selected.paymentMethod && <span className="text-muted ms-2">{selected.paymentMethod}</span>}</p>
+                {selected.paymentProgress && (
+                  <div className="border rounded small p-2 mb-2 bg-light">
+                    <p className="mb-1 fw-semibold">Payment progress</p>
+                    <ul className="list-unstyled mb-1">
+                      {selected.paymentProgress.provider && <li className="mb-0">Provider: <strong>{selected.paymentProgress.provider}</strong></li>}
+                      {selected.paymentProgress.channel && <li className="mb-0">Channel: {selected.paymentProgress.channel}</li>}
+                      <li className="mb-0">Amount: {formatKES(selected.paymentProgress.amount ?? selected.snapshot.total)}</li>
+                      {selected.paymentProgress.updatedAt && <li className="mb-0">Last update: {new Date(selected.paymentProgress.updatedAt).toLocaleString()}</li>}
+                      {selected.paymentProgress.externalRequestId && <li className="mb-0 text-break">Request: {selected.paymentProgress.externalRequestId}</li>}
+                      {selected.paymentProgress.externalTransactionId && <li className="mb-0 text-break">Txn: {selected.paymentProgress.externalTransactionId}</li>}
+                    </ul>
+                    {['INITIATED','PENDING'].includes(selected.paymentProgress.status) && <p className="mb-0 text-warning">Payment is still in progress. Please keep your phone nearby and don’t refresh this page.</p>}
+                    {selected.paymentProgress.status === 'FAILED' && (
+                      <p className="mb-0 text-danger">
+                        {selected.timedOutPayment
+                          ? 'Payment attempt expired after 3 minutes. Please contact support to confirm whether a charge was made before trying again.'
+                          : 'Payment failed. Please contact support if you were charged before trying again from checkout.'}
+                      </p>
+                    )}
+                  </div>
+                )}
                 <div className="table-responsive mb-2">
                   <table className="table table-sm mb-0">
                     <thead>

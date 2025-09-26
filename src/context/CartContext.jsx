@@ -12,6 +12,9 @@ export function CartProvider({ children }) {
       return [];
     }
   });
+  const [hasBackup, setHasBackup] = useState(() => {
+    try { return !!localStorage.getItem('cart_backup'); } catch { return false; }
+  });
 
   useEffect(() => {
     localStorage.setItem('cart', JSON.stringify(items));
@@ -62,11 +65,30 @@ export function CartProvider({ children }) {
 
   function clearCart() { setItems([]); }
 
+  function backupCart() {
+    try {
+      localStorage.setItem('cart_backup', JSON.stringify(items));
+      setHasBackup(true);
+    } catch {}
+  }
+  function restoreCart() {
+    try {
+      const raw = localStorage.getItem('cart_backup');
+      if (raw) {
+        const data = JSON.parse(raw);
+        setItems(Array.isArray(data) ? data : []);
+      }
+    } catch {}
+  }
+  function clearCartBackup() {
+    try { localStorage.removeItem('cart_backup'); setHasBackup(false); } catch {}
+  }
+
   const total = items.reduce((sum, i) => sum + i.price * i.qty, 0);
   const count = items.reduce((sum, i) => sum + i.qty, 0);
 
   return (
-    <CartContext.Provider value={{ items, addItem, removeItem, updateQty, clearCart, total, count }}>
+    <CartContext.Provider value={{ items, addItem, removeItem, updateQty, clearCart, backupCart, restoreCart, clearCartBackup, hasCartBackup: hasBackup, total, count }}>
       {children}
     </CartContext.Provider>
   );
