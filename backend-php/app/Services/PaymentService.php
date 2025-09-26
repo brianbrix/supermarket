@@ -21,14 +21,22 @@ class PaymentService
         $order = Order::findOrFail($orderId);
         $existing = Payment::where('order_id', $orderId)->first();
         if ($existing) { return $existing; }
+        $resolvedMethod = strtoupper($method ?? 'MOBILE_MONEY');
+        $initialStatus = in_array($resolvedMethod, ['CASH_ON_DELIVERY','CASH','COD'], true)
+            ? PaymentStatus::PENDING->value
+            : PaymentStatus::INITIATED->value;
+        $providerRef = $initialStatus === PaymentStatus::INITIATED->value
+            ? 'SIM-'.now()->timestamp
+            : null;
+
         return Payment::create([
             'order_id' => $orderId,
             'user_id' => $userId,
             'amount' => $order->total_gross,
             'currency' => 'KES',
-            'method' => $method ?? 'MOBILE_MONEY',
-            'status' => PaymentStatus::INITIATED->value,
-            'provider_ref' => 'SIM-'.now()->timestamp,
+            'method' => $resolvedMethod,
+            'status' => $initialStatus,
+            'provider_ref' => $providerRef,
         ]);
     }
 
@@ -138,7 +146,7 @@ class PaymentService
             }
         }
         if (!$payment) { return; }
-    if (in_array($payment->status,[PaymentStatus::SUCCESS->value,PaymentStatus::FAILED->value])) { return; }
+        if (in_array($payment->status,[PaymentStatus::SUCCESS->value,PaymentStatus::FAILED->value])) { return; }
         $payment->raw_callback_payload = $raw;
         $resultCode = $payload['resultCode'] ?? $payload['ResultCode'] ?? -1;
         if ((int)$resultCode === 0) {
@@ -153,6 +161,7 @@ class PaymentService
             $this->progressOrder($payment);
         } else {
             $payment->status = PaymentStatus::FAILED->value;
+            $this->failOrder($payment, 'MPESA_CALLBACK_FAILURE', ['resultCode' => $resultCode]);
         }
         $payment->save();
     }
@@ -168,14 +177,18 @@ class PaymentService
         if ($originalId) { $payment = Payment::where('external_request_id',$originalId)->first(); }
         if (!$payment && $transactionId) { $payment = Payment::where('external_transaction_id',$transactionId)->first(); }
         if (!$payment) { return; }
-    if (in_array($payment->status,[PaymentStatus::SUCCESS->value,PaymentStatus::FAILED->value])) { return; }
+        if (in_array($payment->status,[PaymentStatus::SUCCESS->value,PaymentStatus::FAILED->value])) { return; }
         $payment->raw_callback_payload = $raw;
         $statusCode = $payload['statusCode'] ?? null;
         $success = $statusCode && (strtoupper($statusCode) === 'SUCCESS' || $statusCode === '000');
-    $payment->status = $success ? PaymentStatus::SUCCESS->value : PaymentStatus::FAILED->value;
+        $payment->status = $success ? PaymentStatus::SUCCESS->value : PaymentStatus::FAILED->value;
         if ($transactionId) { $payment->external_transaction_id = $transactionId; }
         if (!empty($payload['msisdn'])) { $payment->phone_number = $payload['msisdn']; }
-        if ($success) { $this->progressOrder($payment); }
+        if ($success) {
+            $this->progressOrder($payment);
+        } else {
+            $this->failOrder($payment, 'AIRTEL_CALLBACK_FAILURE', ['statusCode' => $statusCode]);
+        }
         $payment->save();
     }
 
@@ -192,7 +205,7 @@ class PaymentService
         } else {
             abort(422,'payment_id or order_id required');
         }
-    if ($payment->status !== PaymentStatus::INITIATED->value) { return $payment; }
+        if ($payment->status !== PaymentStatus::INITIATED->value) { return $payment; }
         if (!empty($data['provider']) && $payment->provider !== $data['provider']) {
             abort(422,'Provider mismatch');
         }
@@ -205,8 +218,73 @@ class PaymentService
             }
             $this->progressOrder($payment);
             $payment->save();
+        } else {
+            $payment->status = PaymentStatus::FAILED->value;
+            $this->failOrder($payment, 'MANUAL_RECONCILE_MISMATCH', [
+                'phoneMatches' => $phoneOk,
+                'amountMatches' => $amountOk,
+            ]);
+            $payment->save();
         }
         return $payment;
+    }
+
+    public function markOrderPaymentFailed(int $orderId, ?string $reason = null, ?array $context = null): ?Payment
+    {
+        $payment = Payment::where('order_id', $orderId)->latest('id')->first();
+        if ($payment) {
+            if ($payment->status !== PaymentStatus::FAILED->value) {
+                $payment->status = PaymentStatus::FAILED->value;
+                $payment->save();
+            }
+            $this->failOrder($payment, $reason ?? 'CLIENT_REPORTED_FAILURE', $context);
+            return $payment->fresh();
+        }
+
+        $order = Order::find($orderId);
+        if ($order) {
+            $this->failStandaloneOrder($order, $reason, $context);
+        }
+        return null;
+    }
+
+    public function updateCashOnDeliveryStatus(Payment $payment, string $status, ?int $actorId = null): Payment
+    {
+        $method = strtoupper($payment->method ?? '');
+        if ($method !== 'CASH_ON_DELIVERY' && $method !== 'CASH' && $method !== 'COD') {
+            abort(422, 'Only cash-on-delivery payments can be manually updated.');
+        }
+        $normalized = strtoupper($status);
+        $allowed = [
+            PaymentStatus::INITIATED->value,
+            PaymentStatus::PENDING->value,
+            PaymentStatus::SUCCESS->value,
+            PaymentStatus::FAILED->value,
+            PaymentStatus::REFUNDED->value,
+        ];
+        if (!in_array($normalized, $allowed, true)) {
+            abort(422, 'Invalid status value.');
+        }
+        if ($payment->status === $normalized) {
+            return $payment->fresh();
+        }
+        $payment->status = $normalized;
+        $payment->save();
+
+        $order = $payment->order;
+        if ($normalized === PaymentStatus::SUCCESS->value) {
+            $this->progressOrder($payment);
+        } elseif (in_array($normalized, [PaymentStatus::FAILED->value, PaymentStatus::REFUNDED->value], true)) {
+            $this->failOrder($payment, 'ADMIN_UPDATED_STATUS', [
+                'actor_id' => $actorId,
+                'new_status' => $normalized,
+            ]);
+        } elseif ($normalized === PaymentStatus::PENDING->value && $order && $order->status === 'FAILED') {
+            $order->status = 'PENDING';
+            $order->save();
+        }
+
+        return $payment->fresh();
     }
 
     protected function progressOrder(Payment $payment): void
@@ -215,6 +293,35 @@ class PaymentService
         if ($order && $order->status === 'PENDING' && $payment->status === PaymentStatus::SUCCESS->value) {
             $order->status = 'PROCESSING';
             $order->save();
+        }
+    }
+
+    protected function failOrder(Payment $payment, ?string $reason = null, ?array $context = null): void
+    {
+        $order = $payment->order;
+        if (!$order) {
+            return;
+        }
+        $this->failStandaloneOrder($order, $reason, $context);
+    }
+
+    protected function failStandaloneOrder(?Order $order, ?string $reason = null, ?array $context = null): void
+    {
+        if (!$order) {
+            return;
+        }
+        $current = strtoupper($order->status ?? '');
+        if (!in_array($current, ['PENDING','PROCESSING'], true)) {
+            return;
+        }
+        $order->status = 'FAILED';
+        $order->save();
+        if ($reason) {
+            Log::warning('Order marked as FAILED due to payment failure', [
+                'order_id' => $order->id,
+                'reason' => $reason,
+                'context' => $context,
+            ]);
         }
     }
 }

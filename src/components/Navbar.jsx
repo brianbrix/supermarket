@@ -49,13 +49,11 @@ export default function Navbar() {
                 <i className="bi bi-info-circle-fill"></i><span>About</span>
               </NavLink>
             </li>
-            {isAuthenticated && (
-              <li className="nav-item">
-                <NavLink className={({isActive})=>`nav-link px-3 d-flex align-items-center gap-1${isActive?' active fw-semibold':''}`} to="/orders">
-                  <i className="bi bi-receipt-cutoff"></i><span>My Orders</span>
-                </NavLink>
-              </li>
-            )}
+            <li className="nav-item">
+              <NavLink className={({isActive})=>`nav-link px-3 d-flex align-items-center gap-1${isActive?' active fw-semibold':''}`} to="/orders">
+                <i className="bi bi-receipt-cutoff"></i><span>My Orders</span>
+              </NavLink>
+            </li>
             {!isAuthenticated && (
               <li className="nav-item">
                 <NavLink className={({isActive})=>`nav-link px-3 d-flex align-items-center gap-1${isActive?' active fw-semibold':''}`} to="/login">

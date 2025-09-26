@@ -33,6 +33,7 @@ Route::post('/payments/mobile-money/initiate', [PaymentController::class, 'initi
 Route::post('/payments/manual/initiate', [PaymentController::class, 'initiateManual']);
 Route::post('/payments/manual/reconcile', [PaymentController::class, 'reconcileManual']);
 Route::get('/payments/order/{orderId}', [PaymentController::class, 'getByOrder']);
+Route::post('/payments/order/{orderId}/fail', [PaymentController::class, 'failByOrder']);
 Route::get('/payments/options', [PaymentOptionPublicController::class, 'index']);
 // Callback webhooks (no auth)
 Route::post('/payments/mpesa/callback', [PaymentController::class, 'mpesaCallback']);
@@ -59,6 +60,7 @@ Route::middleware(['auth:sanctum','role:ADMIN'])->prefix('admin')->group(functio
     Route::get('/orders', [OrderAdminController::class, 'index']);
     Route::put('/orders/{order}/status', [OrderAdminController::class, 'updateStatus']);
     Route::get('/payments', [PaymentAdminController::class, 'index']);
+    Route::put('/payments/{payment}/status', [PaymentAdminController::class, 'updateStatus']);
     Route::post('/payments/{payment}/confirm', [PaymentController::class, 'confirm']);
     Route::get('/dashboard/stats', [DashboardAdminController::class, 'stats']);
     Route::get('/dashboard/recent-orders', [DashboardAdminController::class, 'recentOrders']);

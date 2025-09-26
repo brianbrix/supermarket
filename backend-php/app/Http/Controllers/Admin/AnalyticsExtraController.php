@@ -40,33 +40,123 @@ class AnalyticsExtraController extends Controller
         $fromDate=$from?Carbon::parse($from):Carbon::now()->subDays(29)->startOfDay();
         $toDate=$to?Carbon::parse($to):Carbon::now();
         if ($toDate->lt($fromDate)) { [$fromDate,$toDate]=[$toDate,$fromDate]; }
-        $orders=Order::whereBetween('created_at',[$fromDate,$toDate])->get(['id','total_gross','created_at']);
+        $statusesRaw = $request->query('statuses', []);
+        if (!is_array($statusesRaw)) {
+            $statusesRaw = $statusesRaw ? explode(',', $statusesRaw) : [];
+        }
+        $includeRefunded = filter_var($request->query('includeRefunded'), FILTER_VALIDATE_BOOLEAN);
+        $includeCancelled = filter_var($request->query('includeCancelled'), FILTER_VALIDATE_BOOLEAN);
+
+        $allowedStatuses = ['PENDING','PROCESSING','SHIPPED','DELIVERED','CANCELLED','REFUNDED','FAILED','COMPLETED'];
+        $aliasMap = [
+            'DELIVERED' => ['DELIVERED','COMPLETED'],
+            'COMPLETED' => ['COMPLETED','DELIVERED'],
+        ];
+
+        $normalizedStatuses = collect($statusesRaw)
+            ->map(fn($s) => strtoupper(trim((string)$s)))
+            ->filter()
+            ->values();
+
+        if ($includeCancelled) {
+            $normalizedStatuses = $normalizedStatuses->merge(['CANCELLED','FAILED']);
+        }
+        if ($includeRefunded) {
+            $normalizedStatuses = $normalizedStatuses->merge(['REFUNDED']);
+        }
+
+        $statusFilter = $normalizedStatuses
+            ->flatMap(function($status) use ($aliasMap) {
+                return $aliasMap[$status] ?? [$status];
+            })
+            ->filter(fn($status) => in_array($status, $allowedStatuses, true))
+            ->unique()
+            ->values()
+            ->all();
+
+        $ordersQuery = Order::whereBetween('created_at', [$fromDate, $toDate]);
+        if (!empty($statusFilter)) {
+            $ordersQuery->whereIn('status', $statusFilter);
+        }
+        $orders = $ordersQuery->orderBy('created_at')->get(['id','total_gross','created_at','status']);
+
         $payments=Payment::whereBetween('created_at',[$fromDate,$toDate])->get(['id','amount','status','created_at']);
         $grossRevenue=(float)$orders->sum('total_gross');
         $orderCount=$orders->count();
         $avgOrderValue=$orderCount>0?round($grossRevenue/$orderCount,2):0.0;
         $completed=$payments->whereIn('status',['SUCCESS','COMPLETED','PAID']);
         $paymentSuccessRate=$payments->count()>0?round(($completed->count()/$payments->count())*100,2):null;
-        $trend=[]; $cursor=$fromDate->copy();
+
+        $trend=[]; $buckets=[]; $cursor=$fromDate->copy();
         while($cursor <= $toDate){
             switch ($granularity){
-                case 'MONTHLY': $bucketStart=$cursor->copy()->startOfMonth(); $bucketEnd=$cursor->copy()->endOfMonth(); $label=$bucketStart->format('Y-m'); $cursor=$cursor->copy()->addMonth(); break;
-                case 'WEEKLY': $bucketStart=$cursor->copy()->startOfWeek(Carbon::MONDAY); $bucketEnd=$cursor->copy()->endOfWeek(Carbon::SUNDAY); $label=$bucketStart->toDateString(); $cursor=$cursor->copy()->addWeek(); break;
-                case 'DAILY': default: $bucketStart=$cursor->copy()->startOfDay(); $bucketEnd=$cursor->copy()->endOfDay(); $label=$bucketStart->toDateString(); $cursor=$cursor->copy()->addDay();
+                case 'MONTHLY':
+                    $bucketStart=$cursor->copy()->startOfMonth();
+                    $bucketEnd=$cursor->copy()->endOfMonth();
+                    $label=$bucketStart->format('Y-m');
+                    $cursor=$cursor->copy()->addMonth();
+                    break;
+                case 'WEEKLY':
+                    $bucketStart=$cursor->copy()->startOfWeek(Carbon::MONDAY);
+                    $bucketEnd=$cursor->copy()->endOfWeek(Carbon::SUNDAY);
+                    $label=$bucketStart->toDateString();
+                    $cursor=$cursor->copy()->addWeek();
+                    break;
+                case 'DAILY':
+                default:
+                    $bucketStart=$cursor->copy()->startOfDay();
+                    $bucketEnd=$cursor->copy()->endOfDay();
+                    $label=$bucketStart->toDateString();
+                    $cursor=$cursor->copy()->addDay();
             }
             if ($bucketEnd>$toDate) $bucketEnd=$toDate;
             $bucketOrders=$orders->filter(fn($o)=>$o->created_at>=$bucketStart && $o->created_at<=$bucketEnd);
-            $bucketGross=(float)$bucketOrders->sum('total_gross'); $bucketCount=$bucketOrders->count();
-            $trend[]=[ 'period'=>$label,'orders'=>$bucketCount,'gross'=>round($bucketGross,2),'aov'=>$bucketCount>0?round($bucketGross/$bucketCount,2):0.0 ];
+            if ($bucketOrders->isEmpty()) {
+                continue;
+            }
+            $bucketGross=(float)$bucketOrders->sum('total_gross');
+            $bucketCount=$bucketOrders->count();
+            $bucketAov=$bucketCount>0?round($bucketGross/$bucketCount,2):0.0;
+            $trend[]=[ 'period'=>$label,'orders'=>$bucketCount,'gross'=>round($bucketGross,2),'aov'=>$bucketAov ];
+            $buckets[]=[
+                'start'=>$bucketStart->toIso8601String(),
+                'end'=>$bucketEnd->toIso8601String(),
+                'orderCount'=>$bucketCount,
+                'gross'=>round($bucketGross,2),
+                'aov'=>$bucketAov,
+            ];
         }
-        return [ 'totals'=>[
-            'grossRevenue'=>round($grossRevenue,2),
-            'orders'=>$orderCount,
-            'avgOrderValue'=>$avgOrderValue,
-            'paymentSuccessRate'=>$paymentSuccessRate,
-            'from'=>$fromDate->toIso8601String(),
-            'to'=>$toDate->toIso8601String(),
-        ], 'trend'=>$trend ];
+
+        $aggregates = [
+            'totalOrders' => $orderCount,
+            'totalGross' => round($grossRevenue, 2),
+            'overallAov' => $avgOrderValue,
+            'paymentSuccessRate' => $paymentSuccessRate,
+        ];
+
+        $filters = [
+            'from' => $fromDate->toIso8601String(),
+            'to' => $toDate->toIso8601String(),
+            'granularity' => $granularity,
+            'statuses' => $statusFilter,
+            'includeCancelled' => $includeCancelled,
+            'includeRefunded' => $includeRefunded,
+        ];
+
+        return [
+            'aggregates' => $aggregates,
+            'buckets' => $buckets,
+            'filters' => $filters,
+            'totals' => [
+                'grossRevenue'=>round($grossRevenue,2),
+                'orders'=>$orderCount,
+                'avgOrderValue'=>$avgOrderValue,
+                'paymentSuccessRate'=>$paymentSuccessRate,
+                'from'=>$fromDate->toIso8601String(),
+                'to'=>$toDate->toIso8601String(),
+            ],
+            'trend'=>$trend,
+        ];
     }
 
     public function advanced(Request $request)
@@ -107,7 +197,7 @@ class AnalyticsExtraController extends Controller
         $churnRatePct = $previousWindowCustomers>0 ? ($churnedCustomers/$previousWindowCustomers)*100 : 0;
 
         // Funnel counts (current window)
-        $statusCounts = ['PENDING'=>0,'PROCESSING'=>0,'SHIPPED'=>0,'DELIVERED'=>0,'CANCELLED'=>0,'REFUNDED'=>0];
+    $statusCounts = ['PENDING'=>0,'PROCESSING'=>0,'SHIPPED'=>0,'DELIVERED'=>0,'CANCELLED'=>0,'REFUNDED'=>0,'FAILED'=>0];
         foreach ($currentOrders as $o) {
             $st = strtoupper($o->status ?? '');
             if (isset($statusCounts[$st])) { $statusCounts[$st]++; }
@@ -116,7 +206,8 @@ class AnalyticsExtraController extends Controller
         $processing = $statusCounts['PROCESSING'];
         $shipped = $statusCounts['SHIPPED'];
         $delivered = $statusCounts['DELIVERED'];
-        $cancelled = $statusCounts['CANCELLED'];
+    $cancelled = $statusCounts['CANCELLED'];
+    $failed = $statusCounts['FAILED'];
         $refunded = $statusCounts['REFUNDED'];
 
         $pct = function($num,$den){ return $den>0 ? round(($num/$den)*100,2) : 0.0; };
@@ -124,7 +215,7 @@ class AnalyticsExtraController extends Controller
         $convProcessingToShipped = $pct($shipped, $processing);
         $convShippedToDelivered = $pct($delivered, $shipped);
         $overallConversionToDelivered = $pct($delivered, $pending); // simple baseline
-        $cancellationRatePct = $pct($cancelled, max(1,$pending));
+    $cancellationRatePct = $pct($cancelled + $failed, max(1,$pending));
         $refundRatePct = $pct($refunded, max(1,$pending));
 
         return response()->json([
@@ -152,6 +243,7 @@ class AnalyticsExtraController extends Controller
                 'shipped' => $shipped,
                 'delivered' => $delivered,
                 'cancelled' => $cancelled,
+                'failed' => $failed,
                 'refunded' => $refunded,
                 'convPendingToProcessing' => $convPendingToProcessing,
                 'convProcessingToShipped' => $convProcessingToShipped,

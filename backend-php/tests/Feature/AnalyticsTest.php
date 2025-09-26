@@ -50,3 +50,46 @@ it('returns analytics overview with AOV and trends', function(){
             ->etc()
         );
 });
+
+it('returns unified analytics buckets respecting status filters', function(){
+    $token = $this->admin->createToken('t')->plainTextToken;
+
+    // Additional cancelled order in window
+    Order::factory()->create([
+        'total_gross' => 150,
+        'total_net' => 129.31,
+        'vat_amount' => 20.69,
+        'status' => 'CANCELLED',
+        'created_at' => now()->subDay(),
+    ]);
+
+    $baseHeaders = ['Authorization' => 'Bearer ' . $token];
+
+    $resp = getJson('/api/admin/analytics/unified?granularity=DAILY&statuses=PENDING&statuses=DELIVERED', $baseHeaders);
+    $resp->assertStatus(200)
+        ->assertJsonStructure([
+            'aggregates' => ['totalOrders','totalGross','overallAov','paymentSuccessRate'],
+            'buckets',
+            'totals' => ['grossRevenue','orders','avgOrderValue','paymentSuccessRate','from','to'],
+            'trend'
+        ]);
+
+    $data = $resp->json();
+    expect($data['aggregates']['totalOrders'])->toBe(2);
+    expect($data['aggregates']['totalGross'])->toBe(800.0);
+    expect($data['aggregates']['overallAov'])->toBe(400.0);
+    expect($data['buckets'])->toBeArray();
+    expect($data['buckets'])->not->toBeEmpty();
+
+    // Without delivered status, only pending order should remain unless cancelled included explicitly
+    $respFiltered = getJson('/api/admin/analytics/unified?granularity=DAILY&statuses=PENDING', $baseHeaders);
+    $filtered = $respFiltered->json();
+    expect($filtered['aggregates']['totalOrders'])->toBe(1);
+    expect($filtered['aggregates']['totalGross'])->toBe(500.0);
+
+    // Including cancelled should pull in cancelled order alongside pending
+    $respWithCancelled = getJson('/api/admin/analytics/unified?granularity=DAILY&statuses=PENDING&includeCancelled=true', $baseHeaders);
+    $withCancelled = $respWithCancelled->json();
+    expect($withCancelled['aggregates']['totalOrders'])->toBe(2);
+    expect($withCancelled['aggregates']['totalGross'])->toBe(650.0);
+});

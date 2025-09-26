@@ -100,6 +100,19 @@ class PaymentController extends Controller
         return new PaymentResource($payment);
     }
 
+    public function failByOrder(Request $request, int $orderId)
+    {
+        $data = $request->validate([
+            'reason' => 'nullable|string|max:255',
+            'context' => 'nullable|array'
+        ]);
+        $payment = $this->payments->markOrderPaymentFailed($orderId, $data['reason'] ?? null, $data['context'] ?? null);
+        if ($payment) {
+            return new PaymentResource($payment);
+        }
+        return response()->json(['status' => 'order_marked_failed'], 200);
+    }
+
     // Webhook: MPESA STK callback
     public function mpesaCallback(Request $request)
     {

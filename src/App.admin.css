@@ -22,9 +22,11 @@
 .status-shipped { background:#e6f9fd; color:#087990; }
 .status-delivered { background:#e9f7f1; color:#146c43; }
 .status-completed { background:#e9f7f1; color:#146c43; }
+.status-success { background:#e9f7f1; color:#146c43; }
 .status-cancelled { background:#fff7e0; color:#8a6d00; }
 .status-refunded { background:#fdecef; color:#b02a37; }
 .status-failed { background:#fdecef; color:#b02a37; }
+.status-initiated { background: #f8f9fa; color:#6c757d; border:1px solid #ced4da; }
 
 /* Apply status color ring to select wrapper */
 .status-select { min-width:120px; }
@@ -32,8 +34,10 @@
 .status-select.processing select { border-color:#0d6efd; }
 .status-select.shipped select { border-color:#087990; }
 .status-select.delivered select, .status-select.completed select { border-color:#198754; }
+.status-select.success select { border-color:#198754; }
 .status-select.cancelled select { border-color:#ffc107; }
 .status-select.refunded select, .status-select.failed select { border-color:#dc3545; }
+.status-select.initiated select { border-color:#ced4da; }
 
 /* Payments table amount emphasis */
 .amount-cell { font-variant-numeric: tabular-nums; }

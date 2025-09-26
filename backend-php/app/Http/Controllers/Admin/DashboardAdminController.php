@@ -18,6 +18,7 @@ class DashboardAdminController extends Controller
         $processingOrders = Order::where('status','PROCESSING')->count();
         $completedOrders = Order::where('status','COMPLETED')->count();
         $cancelledOrders = Order::where('status','CANCELLED')->count();
+    $failedOrders = Order::where('status','FAILED')->count();
 
         // Frontend originally had SHIPPED; return zero for compatibility
         $shippedOrders = Order::where('status','SHIPPED')->count(); // will be 0 unless status added later
@@ -34,6 +35,7 @@ class DashboardAdminController extends Controller
             'processingOrders' => $processingOrders,
             'completedOrders' => $completedOrders,
             'cancelledOrders' => $cancelledOrders,
+            'failedOrders' => $failedOrders,
             'shippedOrders' => $shippedOrders,
             'totalProducts' => $totalProducts,
             'totalAdmins' => $totalAdmins,

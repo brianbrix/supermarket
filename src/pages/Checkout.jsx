@@ -16,6 +16,7 @@ import { useMobileMoneyPayment } from '../hooks/useMobileMoneyPayment.js';
 import PaymentOptionModal from '../components/PaymentOptionModal.jsx';
 import { paymentBranding, api } from '../services/api.js';
 import { useAuth } from '../context/AuthContext.jsx';
+import { appendGuestOrder, ensureGuestSessionId } from '../utils/guestOrders.js';
 
 function buildCartSignature(list) {
   if (!Array.isArray(list) || list.length === 0) return '';
@@ -27,13 +28,30 @@ function buildCartSignature(list) {
 
 export default function Checkout() {
   const { user: authUser } = useAuth();
+  const guestSessionId = ensureGuestSessionId();
   const { items, total, clearCart, backupCart, restoreCart, clearCartBackup, hasCartBackup } = useCart();
   const VAT_RATE = 0.16; // 16% VAT (prices assumed VAT-inclusive)
   const { push } = useToast();
   const navigate = useNavigate();
 
   const persisted = (() => {
-    try { return JSON.parse(sessionStorage.getItem('checkout') || '{}'); } catch { return {}; }
+    let raw = {};
+    try { raw = JSON.parse(sessionStorage.getItem('checkout') || '{}'); } catch { raw = {}; }
+    const snapshot = raw?.orderSnapshot;
+    const snapshotStatus = typeof snapshot?.paymentStatus === 'string' ? snapshot.paymentStatus.toUpperCase() : null;
+    const pendingStatuses = new Set(['PENDING','INITIATED','PROCESSING']);
+    const hasPendingPayment = snapshotStatus ? pendingStatuses.has(snapshotStatus) : false;
+    const hasSnapshotItems = Array.isArray(snapshot?.items) && snapshot.items.length > 0;
+    const stepNumber = Number(raw?.step) || 1;
+    const submittedFlag = Boolean(raw?.submitted);
+    const isStale = submittedFlag
+      || (stepNumber >= 2 && !hasPendingPayment)
+      || (stepNumber >= 2 && !hasSnapshotItems);
+    if (isStale) {
+      try { sessionStorage.removeItem('checkout'); } catch {}
+      return {};
+    }
+    return raw || {};
   })();
   // react-hook-form integration for step 1 (customer details)
   const defaultValues = {
@@ -51,8 +69,9 @@ export default function Checkout() {
   const [orderSnapshot, setOrderSnapshot] = useState(() => persisted.orderSnapshot || null);
   const [step, setStep] = useState(persisted.step || 1); // 1: details, 2: payment, 3: confirm
   // removed manual errors / touched state (handled by react-hook-form)
-  const [payMethod, setPayMethod] = useState(persisted.payMethod || 'mpesa');
+  const [payMethod, setPayMethod] = useState(persisted.payMethod || 'mobile-money');
   const [paymentRef, setPaymentRef] = useState('');
+  const [cashSubmitting, setCashSubmitting] = useState(false);
   const mm = useMobileMoneyPayment();
   const orderRef = useState(() => persisted.orderRef || generateOrderRef())[0];
 
@@ -89,6 +108,85 @@ export default function Checkout() {
   const liveCartTotal = Number.isFinite(Number(total)) ? Number(total) : 0;
   const snapshotTotal = Number.isFinite(Number(orderSnapshot?.total)) ? Number(orderSnapshot.total) : liveCartTotal;
   const formattedSnapshotTotal = snapshotTotal.toFixed(2);
+
+  const PAYMENT_LABELS = {
+    'mobile-money': 'Mobile Money',
+    cash: 'Cash on Delivery',
+    card: 'Card'
+  };
+
+  const formatPaymentMethod = (value, fallback = null) => {
+    let resolved = value;
+    if (!resolved && fallback) resolved = fallback;
+    if (!resolved) return 'Payment';
+    const normalized = resolved.toString();
+    const upper = normalized.toUpperCase();
+    switch (upper) {
+      case 'MPESA':
+        return 'M-Pesa';
+      case 'AIRTEL':
+      case 'AIRTEL_MONEY':
+        return 'Airtel Money';
+      case 'MOBILE_MONEY':
+        return 'Mobile Money';
+      case 'CASH_ON_DELIVERY':
+      case 'COD':
+        return 'Cash on Delivery';
+      case 'CARD':
+      case 'CREDIT_CARD':
+      case 'DEBIT_CARD':
+        return 'Card';
+      default:
+        if (PAYMENT_LABELS[normalized]) return PAYMENT_LABELS[normalized];
+        return normalized
+          .replace(/[_-]/g, ' ')
+          .replace(/\b\w/g, (c) => c.toUpperCase());
+    }
+  };
+
+  const resolvedPaymentProvider = orderSnapshot?.paymentProgress?.provider
+    ?? mm.payment?.provider
+    ?? selectedOption?.provider
+    ?? null;
+
+  const resolvedPaymentChannel = orderSnapshot?.paymentProgress?.channel
+    ?? mm.payment?.channel
+    ?? selectedOption?.channel
+    ?? (resolvedPaymentProvider === 'MPESA'
+      ? 'MPESA_STK_PUSH'
+      : resolvedPaymentProvider === 'AIRTEL'
+        ? 'AIRTEL_STK_PUSH'
+        : null);
+
+  const resolvedPaymentMethodCode = (() => {
+    if (orderSnapshot?.paymentMethod) return orderSnapshot.paymentMethod;
+    if (orderSnapshot?.paymentProgress?.method) return orderSnapshot.paymentProgress.method;
+    if (mm.payment?.method) return mm.payment.method;
+    switch (payMethod) {
+      case 'cash':
+        return 'CASH_ON_DELIVERY';
+      case 'card':
+        return 'CARD';
+      case 'mobile-money':
+        return resolvedPaymentProvider ?? 'MOBILE_MONEY';
+      default:
+        return payMethod || null;
+    }
+  })();
+
+  const resolvedPaymentLabel = formatPaymentMethod(
+    resolvedPaymentProvider ?? resolvedPaymentMethodCode ?? payMethod,
+    resolvedPaymentMethodCode
+  );
+
+  const handlePayMethodChange = (value) => {
+    setPayMethod(value);
+    persist({ payMethod: value });
+    if (value !== 'mobile-money') {
+      setSelectedOption(null);
+      setModalOpen(false);
+    }
+  };
 
   const parseMoney = (value) => {
     if (value == null) return null;
@@ -340,21 +438,93 @@ export default function Checkout() {
       setModalOpen(false);
       // store order history
       try {
-        const raw = localStorage.getItem('orders');
-        const list = raw ? JSON.parse(raw) : [];
-        list.unshift({
-          orderRef,
-          paymentRef: paymentRef,
-          method: payMethod,
-          snapshot,
-          customer: { name: form.name, phone: form.phone, delivery: form.delivery, address: form.address },
-          createdAt: snapshot.ts
+        const itemsForStorage = (Array.isArray(snapshot.items) ? snapshot.items : items).map((i, idx) => {
+          const qty = Number.isFinite(Number(i.qty)) ? Number(i.qty) : 0;
+          const price = parseMoney(i.price) ?? 0;
+          const unitGross = roundCurrency(price) ?? price;
+          const unitNet = roundCurrency(unitGross / (1 + VAT_RATE)) ?? unitGross;
+          const unitVat = roundCurrency(unitGross - unitNet) ?? 0;
+          return {
+            id: i.id ?? idx,
+            productId: i.id ?? idx,
+            productName: i.name ?? `Item ${idx + 1}`,
+            quantity: qty,
+            unitPriceGross: unitGross,
+            unitPriceNet: unitNet,
+            vatAmount: unitVat
+          };
         });
-        localStorage.setItem('orders', JSON.stringify(list.slice(0,50)));
+        const isoCreatedAt = new Date(snapshot.ts || Date.now()).toISOString();
+        const fallbackMethodCode = (() => {
+          if (snapshot.paymentMethod) return snapshot.paymentMethod;
+          if (mm.payment?.method) return mm.payment.method;
+          switch (payMethod) {
+            case 'cash':
+              return 'CASH_ON_DELIVERY';
+            case 'card':
+              return 'CARD';
+            default:
+              return 'MOBILE_MONEY';
+          }
+        })();
+        const fallbackProvider = snapshot.paymentProgress?.provider
+          ?? mm.payment?.provider
+          ?? resolvedPaymentProvider
+          ?? (fallbackMethodCode === 'MOBILE_MONEY' ? 'MPESA' : null);
+        const fallbackChannel = snapshot.paymentProgress?.channel
+          ?? mm.payment?.channel
+          ?? resolvedPaymentChannel
+          ?? (fallbackProvider === 'MPESA'
+            ? 'MPESA_STK_PUSH'
+            : fallbackProvider === 'AIRTEL'
+              ? 'AIRTEL_STK_PUSH'
+              : null);
+        const guestOrder = {
+          id: snapshot.backendOrderId ?? orderSnapshot?.backendOrderId ?? `guest-${orderRef}`,
+          sessionId: guestSessionId,
+          orderRef,
+          createdAt: isoCreatedAt,
+          customerName: form.name,
+          customerPhone: form.phone,
+          items: itemsForStorage,
+          totalGross: snapshot.total,
+          totalNet: snapshot.subtotal ?? roundCurrency(snapshot.total / (1 + VAT_RATE)) ?? snapshot.total,
+          vatAmount: snapshot.vat ?? roundCurrency(snapshot.total - (snapshot.subtotal ?? (snapshot.total / (1 + VAT_RATE)))) ?? 0,
+          paymentStatus: snapshot.paymentStatus ?? 'SUCCESS',
+          paymentMethod: fallbackMethodCode,
+          paymentProgress: snapshot.paymentStatus ? {
+            status: snapshot.paymentStatus,
+            method: fallbackMethodCode,
+            provider: fallbackProvider,
+            channel: fallbackChannel,
+            amount: snapshot.total,
+            updatedAt: isoCreatedAt,
+          } : null,
+          snapshot,
+          guestPaymentRef: paymentRef || null,
+          guestPaymentMethod: payMethod,
+        };
+        appendGuestOrder(guestOrder, guestSessionId);
+        try { localStorage.removeItem('orders'); } catch {}
       } catch {}
     }
     if (mm.status === 'failed' || mm.status === 'timeout') {
       const timedOut = mm.payment?.failureReason === 'TIMEOUT_EXPIRED' || mm.status === 'timeout';
+      if (orderSnapshot?.backendOrderId) {
+        (async () => {
+          try {
+            await api.payments.markFailed(orderSnapshot.backendOrderId, {
+              reason: timedOut ? 'TIMEOUT_EXPIRED' : 'PAYMENT_FAILED',
+              context: {
+                hookStatus: mm.status,
+                failureReason: mm.payment?.failureReason ?? null
+              }
+            });
+          } catch (err) {
+            console.warn('Failed to notify backend about order failure', err);
+          }
+        })();
+      }
       push(timedOut ? 'Payment attempt expired after 3 minutes. If your mobile money was charged, please contact support.' : 'Payment failed', timedOut ? 'warning' : 'error');
       // Automatically restore cart on failure if we have a backup
       try {
@@ -420,7 +590,7 @@ export default function Checkout() {
                 { text: `Order: ${orderRef}`, style: 'meta' },
                 paymentRef ? { text: `Payment: ${paymentRef}`, style: 'meta' } : null,
                 { text: `Date: ${new Date(snap.ts || Date.now()).toLocaleString()}`, style: 'meta' },
-                { text: `Method: ${payMethod === 'mpesa' ? 'M-Pesa' : 'Airtel'}`, style: 'meta' }
+                { text: `Method: ${resolvedPaymentLabel}`, style: 'meta' }
               ].filter(Boolean),
               [
                 { text: 'Customer', style: 'metaBold', alignment: 'right' },
@@ -626,6 +796,160 @@ export default function Checkout() {
     }
   }
 
+  const continueWithCash = async () => {
+    if (cashSubmitting) return;
+    if (!items.length) {
+      push('Your cart is empty. Add items before placing an order.', 'warning');
+      return;
+    }
+
+    const now = Date.now();
+    const cartSignatureBefore = buildCartSignature(items);
+    const cartItems = items.map((item, idx) => {
+      const qty = Number.isFinite(Number(item.qty)) ? Number(item.qty) : 0;
+      const priceValue = parseMoney(item.price) ?? 0;
+      const unitGross = roundCurrency(priceValue) ?? priceValue;
+      return {
+        id: item.id ?? idx,
+        name: item.name ?? `Item ${idx + 1}`,
+        price: unitGross,
+        qty
+      };
+    });
+    const gross = roundCurrency(liveCartTotal) ?? liveCartTotal;
+    const vatPortion = roundCurrency(gross - (gross / (1 + VAT_RATE))) ?? 0;
+    const net = roundCurrency(gross - vatPortion) ?? gross;
+
+    setCashSubmitting(true);
+    let createdOrder = null;
+    try {
+      createdOrder = await ensureBackendOrder();
+      if (!createdOrder) {
+        setCashSubmitting(false);
+        return;
+      }
+      const backendOrderId = createdOrder.id ?? orderSnapshot?.backendOrderId;
+      if (!backendOrderId) {
+        push('Unable to prepare your cash payment. Please try again.', 'error');
+        setCashSubmitting(false);
+        return;
+      }
+
+      const paymentResp = await api.payments.create({ orderId: backendOrderId, method: 'CASH_ON_DELIVERY' });
+      const paymentData = paymentResp?.data ?? paymentResp;
+      const paymentStatus = (paymentData?.status ?? 'PENDING').toUpperCase();
+      const paymentMethodCode = paymentData?.method ?? 'CASH_ON_DELIVERY';
+      const paymentProgress = paymentData ? {
+        id: paymentData.id,
+        status: paymentStatus,
+        method: paymentMethodCode,
+        provider: paymentData.provider ?? null,
+        channel: paymentData.channel ?? null,
+        amount: paymentData.amount ?? gross,
+        createdAt: paymentData.createdAt ?? new Date(now).toISOString(),
+        updatedAt: paymentData.updatedAt ?? paymentData.createdAt ?? null,
+        externalRequestId: paymentData.externalRequestId ?? null,
+        externalTransactionId: paymentData.externalTransactionId ?? null
+      } : null;
+
+      const backendSubtotal = parseMoney(createdOrder?.totalNet ?? createdOrder?.subtotal ?? createdOrder?.netTotal);
+      const backendVat = parseMoney(createdOrder?.vatAmount ?? createdOrder?.vat ?? createdOrder?.taxAmount);
+      const backendTotal = parseMoney(createdOrder?.totalGross ?? createdOrder?.total ?? createdOrder?.totalAmount);
+
+      const snapshotItems = Array.isArray(createdOrder?.items) && createdOrder.items.length > 0
+        ? createdOrder.items.map((item, idx) => {
+            const fallbackSource = cartItems[idx];
+            const product = item.product || {};
+            const qtyRaw = item.quantity ?? item.qty ?? fallbackSource?.qty ?? 0;
+            const qty = Number.isFinite(Number(qtyRaw)) ? Number(qtyRaw) : 0;
+            const lineGross = parseMoney(item.totalGross ?? item.lineTotal ?? item.totalAmount ?? item.total);
+            const unitGross = parseMoney(item.unitPriceGross ?? item.price ?? item.unitPrice);
+            const fallbackUnit = parseMoney(fallbackSource?.price);
+            const resolvedUnit = unitGross != null ? unitGross : (qty > 0 && lineGross != null ? lineGross / qty : fallbackUnit);
+            const productId = product.id ?? item.productId ?? fallbackSource?.id ?? item.id ?? idx;
+            const label = (product.name ?? item.productName ?? item.name ?? fallbackSource?.name ?? `Item ${productId}`).toString();
+            const roundedUnit = roundCurrency(resolvedUnit) ?? fallbackUnit ?? 0;
+            return { id: productId, name: label, price: roundedUnit, qty };
+          })
+        : cartItems;
+
+      const resolvedSubtotal = roundCurrency(backendSubtotal ?? net) ?? net;
+      const resolvedVat = roundCurrency(backendVat ?? vatPortion) ?? vatPortion;
+      const resolvedTotal = roundCurrency(backendTotal ?? gross) ?? gross;
+      const snapshotUserId = createdOrder?.user?.id ?? createdOrder?.user_id ?? (authUser?.id ?? null);
+
+      const snapshot = {
+        items: snapshotItems,
+        subtotal: resolvedSubtotal,
+        vat: resolvedVat,
+        total: resolvedTotal,
+        ts: now,
+        backendOrderId,
+        cartSignature: cartSignatureBefore,
+        userId: snapshotUserId,
+        paymentStatus,
+        paymentMethod: paymentMethodCode,
+        paymentProgress,
+      };
+
+      setOrderSnapshot(snapshot);
+      setPaymentRef('');
+      setSubmitted(true);
+      setStep(3);
+      persist({ orderSnapshot: snapshot, submitted: true, step: 3, payMethod: 'cash' });
+
+      try { clearCartBackup(); } catch {}
+
+      try {
+        const itemsForStorage = snapshotItems.map((item, idx) => {
+          const qty = Number.isFinite(Number(item.qty)) ? Number(item.qty) : 0;
+          const unitGross = Number.isFinite(Number(item.price)) ? Number(item.price) : 0;
+          const unitNet = roundCurrency(unitGross / (1 + VAT_RATE)) ?? unitGross;
+          const unitVat = roundCurrency(unitGross - unitNet) ?? 0;
+          return {
+            id: item.id ?? idx,
+            productId: item.id ?? idx,
+            productName: item.name,
+            quantity: qty,
+            unitPriceGross: unitGross,
+            unitPriceNet: unitNet,
+            vatAmount: unitVat
+          };
+        });
+        const isoCreatedAt = new Date(now).toISOString();
+        appendGuestOrder({
+          id: backendOrderId,
+          sessionId: guestSessionId,
+          orderRef,
+          createdAt: isoCreatedAt,
+          customerName: form.name,
+          customerPhone: form.phone,
+          items: itemsForStorage,
+          totalGross: resolvedTotal,
+          totalNet: resolvedSubtotal,
+          vatAmount: resolvedVat,
+          paymentStatus,
+          paymentMethod: paymentMethodCode,
+          paymentProgress,
+          snapshot,
+          guestPaymentRef: null,
+          guestPaymentMethod: 'cash'
+        }, guestSessionId);
+      } catch {}
+
+      push('Order placed. Please pay when your items arrive.', 'success');
+    } catch (e) {
+      if (createdOrder && hasCartBackup) {
+        try {
+          restoreCart();
+        } catch {}
+      }
+      push(e.message || 'Could not record cash payment. Please contact support or try again.', 'error');
+    } finally {
+      setCashSubmitting(false);
+    }
+  };
+
   if (shouldRedirectToCart) {
     return (
       <section className="py-5">
@@ -667,7 +991,14 @@ export default function Checkout() {
               <div>
                 <h2 className="h6 mb-1">Receipt</h2>
                 <p className="small text-muted mb-0">Ref: <strong>{orderRef}</strong></p>
-                {paymentRef && <p className="small text-muted mb-0">Payment: <strong>{paymentRef}</strong> ({payMethod === 'mpesa' ? 'M-Pesa' : 'Airtel'})</p>}
+                {paymentRef && (
+                  <p className="small text-muted mb-0">
+                    Payment: <strong>{paymentRef}</strong> ({resolvedPaymentLabel})
+                  </p>
+                )}
+                {!paymentRef && resolvedPaymentLabel && (
+                  <p className="small text-muted mb-0">Payment Method: {resolvedPaymentLabel}</p>
+                )}
                 <p className="small text-muted mb-0">Date: {new Date(snap.ts || Date.now()).toLocaleString()}</p>
               </div>
               <div className="text-md-end">
@@ -763,34 +1094,84 @@ export default function Checkout() {
           {step === 2 && (
             <div>
               <h2 className="h5 mb-2">Payment</h2>
-              <p className="text-muted small mb-2">Select a payment option below. STK supported methods will trigger a phone prompt; others show instructions.</p>
-              {optionsLoading && <p className="small text-muted">Loading options…</p>}
-              <div className="d-flex flex-wrap gap-2 mb-3">
-                {paymentOptions.map(opt => {
-                  const b = paymentBranding[opt.provider] || { color:'#222', bg:'#eee' };
-                  const subtitle = opt.shortDescription || summarizeInstructions(opt.instructionsMarkdown) || opt.channel;
-                  return (
-                    <button key={opt.id} type="button" onClick={()=>openOption(opt)} className="btn btn-light border position-relative" style={{minWidth:180, textAlign:'left'}}>
-                      <span className="d-flex align-items-center gap-2">
-                        <span style={{width:26,height:26,background:b.color,color:'#fff',borderRadius:6,fontSize:12,fontWeight:600,display:'flex',alignItems:'center',justifyContent:'center'}}>{opt.provider[0]}</span>
-                        <span className="d-flex flex-column">
-                          <strong className="small mb-0" style={{color:b.color}}>{opt.displayName}</strong>
-                          <span className="text-muted small" style={{lineHeight:1.1}}>{subtitle}</span>
-                        </span>
-                      </span>
-                      {opt.supportsStk && <span className="badge bg-success position-absolute top-0 end-0 m-1" style={{fontSize:'0.6rem'}}>STK</span>}
-                    </button>
-                  );
-                })}
-                {paymentOptions.length===0 && !optionsLoading && (
-                  <div className="alert alert-warning w-100 py-2 small">No payment options configured.</div>
-                )}
-              </div>
-              {mm.status==='pending' && <p className="small text-muted mt-2">Awaiting confirmation on your phone…</p>}
-              {mm.status==='timeout' && <p className="small text-danger mt-2">Timed out waiting for confirmation. Try again.</p>}
-              {mm.error && <p className="small text-danger mt-2">{mm.error}</p>}
+              <p className="text-muted small mb-2">Choose how you’d like to pay for this order.</p>
+              <fieldset className="border rounded p-3 mb-3">
+                <legend className="float-none w-auto px-2 text-uppercase small text-muted mb-0">Payment Method</legend>
+                <div className="form-check mb-2">
+                  <input className="form-check-input" type="radio" name="paymentMethod" id="pay-mobile" value="mobile-money" checked={payMethod==='mobile-money'} onChange={()=>handlePayMethodChange('mobile-money')} />
+                  <label className="form-check-label fw-semibold" htmlFor="pay-mobile">Mobile Money</label>
+                  <div className="form-text">Instant M-Pesa or Airtel STK push to your phone.</div>
+                </div>
+                <div className="form-check mb-2">
+                  <input className="form-check-input" type="radio" name="paymentMethod" id="pay-cash" value="cash" checked={payMethod==='cash'} onChange={()=>handlePayMethodChange('cash')} />
+                  <label className="form-check-label fw-semibold" htmlFor="pay-cash">Cash on Delivery</label>
+                  <div className="form-text">Pay when your order arrives or at pickup.</div>
+                </div>
+                <div className="form-check">
+                  <input className="form-check-input" type="radio" name="paymentMethod" id="pay-card" value="card" checked={payMethod==='card'} onChange={()=>handlePayMethodChange('card')} />
+                  <label className="form-check-label fw-semibold" htmlFor="pay-card">Card</label>
+                  <div className="form-text">Pay with Visa or Mastercard (coming soon).</div>
+                </div>
+              </fieldset>
+
+              {payMethod === 'mobile-money' && (
+                <>
+                  {optionsLoading && <p className="small text-muted">Loading options…</p>}
+                  <div className="d-flex flex-wrap gap-2 mb-3">
+                    {paymentOptions.map(opt => {
+                      const b = paymentBranding[opt.provider] || { color:'#222', bg:'#eee' };
+                      const subtitle = opt.shortDescription || summarizeInstructions(opt.instructionsMarkdown) || opt.channel;
+                      return (
+                        <button key={opt.id} type="button" onClick={()=>openOption(opt)} className="btn btn-light border position-relative" style={{minWidth:180, textAlign:'left'}}>
+                          <span className="d-flex align-items-center gap-2">
+                            <span style={{width:26,height:26,background:b.color,color:'#fff',borderRadius:6,fontSize:12,fontWeight:600,display:'flex',alignItems:'center',justifyContent:'center'}}>{opt.provider[0]}</span>
+                            <span className="d-flex flex-column">
+                              <strong className="small mb-0" style={{color:b.color}}>{opt.displayName}</strong>
+                              <span className="text-muted small" style={{lineHeight:1.1}}>{subtitle}</span>
+                            </span>
+                          </span>
+                          {opt.supportsStk && <span className="badge bg-success position-absolute top-0 end-0 m-1" style={{fontSize:'0.6rem'}}>STK</span>}
+                        </button>
+                      );
+                    })}
+                    {paymentOptions.length===0 && !optionsLoading && (
+                      <div className="alert alert-warning w-100 py-2 small">No payment options configured.</div>
+                    )}
+                  </div>
+                  {mm.status==='pending' && <p className="small text-muted mt-2">Awaiting confirmation on your phone…</p>}
+                  {mm.status==='timeout' && <p className="small text-danger mt-2">Timed out waiting for confirmation. Try again.</p>}
+                  {mm.error && <p className="small text-danger mt-2">{mm.error}</p>}
+                </>
+              )}
+
+              {payMethod === 'cash' && (
+                <div className="alert alert-success small">
+                  We’ll prepare your order and you can pay in cash when it’s delivered or collected.
+                </div>
+              )}
+
+              {payMethod === 'card' && (
+                <div className="alert alert-info small">
+                  Card payments are almost ready. In the meantime, please choose another payment method.
+                </div>
+              )}
+
               {/* Reconciliation moved inside modal for manual (non-STK) flows */}
               <div className="d-flex gap-2 flex-wrap mt-3">
+                {payMethod === 'cash' && (
+                  <button
+                    type="button"
+                    className="btn btn-success flex-grow-1 flex-sm-grow-0 d-flex align-items-center justify-content-center gap-2"
+                    onClick={continueWithCash}
+                    disabled={cashSubmitting}
+                  >
+                    {cashSubmitting && <span className="spinner-border spinner-border-sm" role="status" aria-hidden="true"></span>}
+                    <span>Continue</span>
+                  </button>
+                )}
+                {payMethod === 'card' && (
+                  <button type="button" className="btn btn-success flex-grow-1 flex-sm-grow-0" disabled>Continue</button>
+                )}
                 <button type="button" className="btn btn-outline-secondary flex-grow-1 flex-sm-grow-0" onClick={()=>setStep(1)}>Back</button>
               </div>
             </div>

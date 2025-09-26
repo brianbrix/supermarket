@@ -15,11 +15,22 @@ export function useMobileMoneyPayment({ pollIntervalMs = 3000, timeoutMs = DEFAU
   const pollRef = useRef();
   const startedAtRef = useRef(0);
   const orderIdRef = useRef();
+  const failureReportedRef = useRef(false);
 
   const clearTimers = () => {
     if (pollRef.current) { clearInterval(pollRef.current); pollRef.current = null; }
     if (timeoutRef.current) { clearTimeout(timeoutRef.current); timeoutRef.current = null; }
   };
+
+  const reportFailure = useCallback(async (orderId, reason, context) => {
+    if (!orderId || failureReportedRef.current) return;
+    failureReportedRef.current = true;
+    try {
+      await api.payments.markFailed(orderId, { reason, context });
+    } catch (err) {
+      console.warn('Failed to report payment failure', err);
+    }
+  }, []);
 
   const poll = useCallback(async () => {
     if (!orderIdRef.current) return;
@@ -29,12 +40,15 @@ export function useMobileMoneyPayment({ pollIntervalMs = 3000, timeoutMs = DEFAU
       if (payment.status === 'SUCCESS' || payment.status === 'FAILED') {
         clearTimers();
         setState(s => ({ ...s, status: payment.status === 'SUCCESS' ? 'succeeded' : 'failed' }));
+        if (payment.status === 'FAILED') {
+          reportFailure(payment.orderId, 'PROVIDER_REPORTED_FAILURE', { source: 'poll' });
+        }
       }
     } catch (e) {
       // swallow intermittent errors; surface only if still idle
       setState(s => ({ ...s, error: e.message }));
     }
-  }, []);
+  }, [reportFailure]);
 
   const initiate = useCallback(async (payload) => {
     clearTimers();
@@ -43,6 +57,7 @@ export function useMobileMoneyPayment({ pollIntervalMs = 3000, timeoutMs = DEFAU
       const resp = await api.payments.initiateMobileMoney(payload);
       orderIdRef.current = resp.orderId;
       startedAtRef.current = Date.now();
+      failureReportedRef.current = false;
       setState({ status: 'pending', error: null, payment: resp });
       // start polling
       pollRef.current = setInterval(poll, pollIntervalMs);
@@ -50,6 +65,7 @@ export function useMobileMoneyPayment({ pollIntervalMs = 3000, timeoutMs = DEFAU
       setTimeout(poll, 1000);
       timeoutRef.current = setTimeout(() => {
         clearTimers();
+        const orderId = orderIdRef.current;
         setState(s => {
           const elapsed = Date.now() - (startedAtRef.current || Date.now());
           const nextPayment = s.payment ? { ...s.payment, status: 'FAILED', failureReason: 'TIMEOUT_EXPIRED', timeoutElapsedMs: elapsed } : {
@@ -61,13 +77,14 @@ export function useMobileMoneyPayment({ pollIntervalMs = 3000, timeoutMs = DEFAU
           orderIdRef.current = undefined;
           return { ...s, status: 'failed', payment: nextPayment };
         });
+        reportFailure(orderId, 'TIMEOUT_EXPIRED', { timeoutMs });
       }, timeoutMs);
       return resp;
     } catch (e) {
       setState({ status: 'error', error: e.message, payment: null });
       throw e;
     }
-  }, [poll, pollIntervalMs, timeoutMs]);
+  }, [poll, pollIntervalMs, timeoutMs, reportFailure]);
 
   useEffect(() => () => clearTimers(), []);
 
@@ -84,13 +101,16 @@ export function useMobileMoneyPayment({ pollIntervalMs = 3000, timeoutMs = DEFAU
         setTimeout(poll, 1000);
       } else {
         clearTimers();
+        if (resp.status === 'FAILED') {
+          reportFailure(resp.orderId, 'MANUAL_RECONCILE_FAILED', { source: 'reconcile' });
+        }
       }
       return resp;
     } catch (e) {
       setState(s => ({ ...s, error: e.message, status: 'error' }));
       throw e;
     }
-  }, [poll, pollIntervalMs]);
+  }, [poll, pollIntervalMs, reportFailure]);
 
   return { ...state, initiate, reconcile };
 }

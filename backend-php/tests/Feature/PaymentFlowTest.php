@@ -1,5 +1,6 @@
 <?php
 
+use App\Enums\PaymentStatus;
 use App\Models\Order;
 use App\Models\PaymentOption;
 use App\Models\User;
@@ -59,6 +60,19 @@ it('initiates manual payment and reconciles to success', function() {
         'amount' => 1500
     ]);
     $rec->assertStatus(200)->assertJsonPath('data.status','SUCCESS');
+});
+
+it('creates cash on delivery payment as pending', function () {
+    $this->actingAs($this->user);
+
+    $resp = $this->postJson('/api/payments', [
+        'order_id' => $this->order->id,
+        'method' => 'CASH_ON_DELIVERY'
+    ]);
+
+    $resp->assertStatus(200)
+        ->assertJsonPath('data.status', PaymentStatus::PENDING->value)
+        ->assertJsonPath('data.method', 'CASH_ON_DELIVERY');
 });
 
 it('handles mpesa callback to success', function() {

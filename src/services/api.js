@@ -54,10 +54,12 @@ export const api = {
     confirmPasswordReset: (payload) => request('/auth/password-reset/confirm', { method: 'POST', body: JSON.stringify(payload) })
   },
   payments: {
+    create: (payload) => request('/payments', { method: 'POST', body: JSON.stringify(payload) }),
     initiateMobileMoney: (payload) => request('/payments/mobile-money/initiate', { method: 'POST', body: JSON.stringify(payload) }),
     initiateManual: (payload) => request('/payments/manual/initiate', { method: 'POST', body: JSON.stringify(payload) }),
     reconcileManual: (payload) => request('/payments/manual/reconcile', { method: 'POST', body: JSON.stringify(payload) }),
     byOrder: (orderId) => request(`/payments/order/${orderId}`),
+    markFailed: (orderId, payload) => request(`/payments/order/${orderId}/fail`, { method: 'POST', body: JSON.stringify(payload ?? {}) }),
     options: () => request('/payments/options')
   },
   products: {
@@ -190,6 +192,7 @@ export const api = {
         if (direction) params.set('direction', direction);
         return request(`/admin/payments?${params.toString()}`);
       },
+      updateStatus: (paymentId, status) => request(`/admin/payments/${paymentId}/status`, { method: 'PUT', body: JSON.stringify({ status }) }),
       options: {
         list: (page=0,size=20) => {
           // Support pagination if backend implements it; fallback gracefully if not.

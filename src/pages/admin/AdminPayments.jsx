@@ -12,11 +12,23 @@ export default function AdminPayments() {
   const [size, setSize] = useState(20);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(null);
+  const [flash, setFlash] = useState(null);
+  const [updatingId, setUpdatingId] = useState(null);
   const [draftFilters, setDraftFilters] = useState({ q:'', status:'', method:'', from:'', to:'', minAmount:'', maxAmount:'', sort:'createdAt', direction:'desc' });
   const [appliedFilters, setAppliedFilters] = useState({ q:'', status:'', method:'', from:'', to:'', minAmount:'', maxAmount:'', sort:'createdAt', direction:'desc' });
   const debounceRef = useRef();
   const firstDebounceRef = useRef(true); // skip first identical-to-default transition
   const didInitialLoadRef = useRef(false); // guard StrictMode double invoke
+
+  const STATUS_OPTIONS = ['INITIATED','PENDING','SUCCESS','FAILED','REFUNDED'];
+  const COD_STATUS_OPTIONS = ['PENDING','SUCCESS','FAILED','REFUNDED'];
+  const METHOD_LABELS = {
+    MOBILE_MONEY: 'Mobile Money',
+    CASH_ON_DELIVERY: 'Cash on Delivery',
+    CARD: 'Card',
+    CASH: 'Cash',
+    COD: 'Cash on Delivery'
+  };
 
   function load(immediate=false){
     if (!immediate) setLoading(true);
@@ -32,7 +44,13 @@ export default function AdminPayments() {
       sort, direction
     };
   api.admin.payments.list(page,size,payload)
-      .then(resp => { setPayments(resp.content || resp); setPageMeta(resp); setLoading(false); })
+      .then(resp => {
+        setPayments(resp.content?.data || resp.content || resp);
+        setPageMeta(resp);
+        setLoading(false);
+        setError(null);
+        setFlash(null);
+      })
       .catch(e => { setError(e.message); setLoading(false); });
   }
   useEffect(()=>{
@@ -53,9 +71,37 @@ export default function AdminPayments() {
   function applySort(e){ const [s,d]=e.target.value.split(':'); setDraftFilters(f=>({...f,sort:s,direction:d})); setAppliedFilters(a=>({...a,sort:s,direction:d})); setPage(0); load(true); }
   function clearFilters(){ const base={ q:'', status:'', method:'', from:'', to:'', minAmount:'', maxAmount:'', sort:'createdAt', direction:'desc' }; setDraftFilters(base); setAppliedFilters(base); setPage(0); load(true); }
 
+  function formatMethodLabel(method){
+    if (!method) return 'Unknown';
+    const key = method.toUpperCase();
+    return METHOD_LABELS[key] || method.replace(/_/g,' ').replace(/\b\w/g,c=>c.toUpperCase());
+  }
+
+  function formatStatusLabel(status){
+    if (!status) return '—';
+    return status.replace(/_/g,' ');
+  }
+
+  async function handleStatusChange(paymentId, nextStatus){
+    setUpdatingId(paymentId);
+    try {
+      const resp = await api.admin.payments.updateStatus(paymentId, nextStatus);
+      const payload = resp.data || resp;
+      setPayments(prev => prev.map(p => p.id === paymentId ? { ...p, ...payload } : p));
+      setFlash(`Payment #${paymentId} marked as ${formatStatusLabel(nextStatus)}.`);
+      setError(null);
+    } catch (e) {
+      setError(e.message);
+      setFlash(null);
+    } finally {
+      setUpdatingId(null);
+    }
+  }
+
   return (
     <div className="container py-4">
       <h1 className="h4 mb-3">Payments</h1>
+      {flash && <div className="alert alert-success alert-sm py-2" role="status">{flash}</div>}
       <FilterBar>
         <FilterBar.Field label="Search" width="col-12 col-md-3">
           <input className="form-control form-control-sm" placeholder="Customer / Ref" value={draftFilters.q} onChange={e=>updateFilter('q', e.target.value)} />
@@ -63,13 +109,13 @@ export default function AdminPayments() {
         <FilterBar.Field label="Status">
           <select className="form-select form-select-sm" value={draftFilters.status} onChange={e=>updateFilter('status', e.target.value)}>
             <option value="">All</option>
-            {['PENDING','COMPLETED','FAILED','REFUNDED'].map(s=> <option key={s} value={s}>{s}</option>)}
+            {STATUS_OPTIONS.map(s=> <option key={s} value={s}>{s}</option>)}
           </select>
         </FilterBar.Field>
         <FilterBar.Field label="Method">
           <select className="form-select form-select-sm" value={draftFilters.method} onChange={e=>updateFilter('method', e.target.value)}>
             <option value="">All</option>
-            {['MOBILE','CARD','CASH','TRANSFER'].map(m=> <option key={m} value={m}>{m}</option>)}
+            {['MOBILE_MONEY','CASH_ON_DELIVERY','CARD'].map(m=> <option key={m} value={m}>{formatMethodLabel(m)}</option>)}
           </select>
         </FilterBar.Field>
         <FilterBar.Field label="From">
@@ -108,16 +154,42 @@ export default function AdminPayments() {
             </thead>
             <tbody>
               {payments.length === 0 && <tr><td colSpan={6} className="text-center text-muted">No payments</td></tr>}
-              {payments.map(p => (
-                <tr key={p.id}>
-                  <td>{p.id}</td>
-                  <td>{p.orderId}</td>
-                  <td>{p.amount}</td>
-                  <td><StatusBadge status={p.status || 'PAID'} /></td>
-                  <td>{p.method || 'MOBILE'}</td>
-                  <td>{p.createdAt ? new Date(p.createdAt).toLocaleString() : '—'}</td>
-                </tr>
-              ))}
+              {payments.map(p => {
+                const amountValue = Number(p.amount);
+                const statusValue = p.status || 'PENDING';
+                const methodKey = (p.method || '').toUpperCase();
+                const isCash = ['CASH_ON_DELIVERY','CASH','COD'].includes(methodKey);
+                return (
+                  <tr key={p.id}>
+                    <td>{p.id}</td>
+                    <td>{p.orderId}</td>
+                    <td className="amount-cell">{Number.isFinite(amountValue) ? amountValue.toFixed(2) : (p.amount ?? '—')}</td>
+                    <td>
+                      {isCash ? (
+                        <div className={`status-select ${statusValue.toLowerCase()}`}>
+                          <div className="d-flex align-items-center gap-2">
+                            <select
+                              className="form-select form-select-sm"
+                              value={statusValue}
+                              onChange={e => handleStatusChange(p.id, e.target.value)}
+                              disabled={updatingId === p.id}
+                            >
+                              {COD_STATUS_OPTIONS.map(opt => (
+                                <option key={opt} value={opt}>{formatStatusLabel(opt)}</option>
+                              ))}
+                            </select>
+                            {updatingId === p.id && <span className="spinner-border spinner-border-sm" role="status" aria-hidden="true"></span>}
+                          </div>
+                        </div>
+                      ) : (
+                        <StatusBadge status={statusValue} />
+                      )}
+                    </td>
+                    <td>{formatMethodLabel(p.method)}</td>
+                    <td>{p.createdAt ? new Date(p.createdAt).toLocaleString() : '—'}</td>
+                  </tr>
+                );
+              })}
             </tbody>
           </table>
           <PaginationBar {...pageMeta} size={size} onPageChange={setPage} alwaysVisible sizes={[10,20,50,100]} onPageSizeChange={(newSize)=>{ setSize(newSize); setPage(0); }} />

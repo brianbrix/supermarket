@@ -6,9 +6,14 @@ use App\Http\Controllers\Controller;
 use App\Models\Payment;
 use Illuminate\Http\Request;
 use App\Http\Resources\PaymentResource;
+use App\Services\PaymentService;
+use App\Enums\PaymentStatus;
+use Illuminate\Validation\Rule;
 
 class PaymentAdminController extends Controller
 {
+    public function __construct(private PaymentService $payments) {}
+
     public function index(Request $request)
     {
         $sort = $request->get('sort', 'created_at');
@@ -47,5 +52,20 @@ class PaymentAdminController extends Controller
             'last' => $paginator->currentPage() === $paginator->lastPage(),
             'sort' => null
         ]);
+    }
+
+    public function updateStatus(Request $request, Payment $payment)
+    {
+        $data = $request->validate([
+            'status' => ['required','string', Rule::in([
+                PaymentStatus::INITIATED->value,
+                PaymentStatus::PENDING->value,
+                PaymentStatus::SUCCESS->value,
+                PaymentStatus::FAILED->value,
+                PaymentStatus::REFUNDED->value,
+            ])]
+        ]);
+        $updated = $this->payments->updateCashOnDeliveryStatus($payment, $data['status'], optional($request->user())->id);
+        return new PaymentResource($updated);
     }
 }
