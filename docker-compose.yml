@@ -1,0 +1,128 @@
+version: "3.9"
+
+services:
+  traefik:
+    image: traefik:v3.1
+    container_name: traefik-gateway
+    restart: unless-stopped
+    ports:
+      - "80:80"
+      - "443:443"
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock:ro
+      - ./docker/traefik/traefik.yml:/etc/traefik/traefik.yml:ro
+      - ./docker/traefik/dynamic:/etc/traefik/dynamic:ro
+      - ./docker/traefik/dashboard-users.htpasswd:/etc/traefik/dashboard-users.htpasswd:ro
+      - traefik-acme:/etc/traefik/acme
+    environment:
+      TRAEFIK_LOG_LEVEL: ${TRAEFIK_LOG_LEVEL:-INFO}
+    networks:
+      - default
+      - traefik
+    labels:
+      - "traefik.enable=true"
+      - "traefik.http.routers.traefik.rule=PathPrefix(`/traefik`)"
+      - "traefik.http.routers.traefik.entrypoints=web"
+      - "traefik.http.routers.traefik.service=api@internal"
+      - "traefik.http.middlewares.traefik-strip.stripprefix.prefixes=/traefik"
+      - "traefik.http.routers.traefik.middlewares=traefik-strip,dashboard-auth@file"
+
+  frontend:
+    build:
+      context: .
+      dockerfile: docker/frontend/Dockerfile
+      args:
+        VITE_API_BASE_URL: ${VITE_API_BASE_URL:-http://backend:8000/api}
+        VITE_BASE_PATH: ${VITE_BASE_PATH:-/}
+    image: supermarket-frontend:latest
+    depends_on:
+      backend:
+        condition: service_started
+    ports:
+      - "8080:80"
+    restart: unless-stopped
+    labels:
+      - "traefik.enable=true"
+      - "traefik.http.routers.shop.rule=PathPrefix(`/shop`)"
+      - "traefik.http.routers.shop.entrypoints=web"
+      - "traefik.http.routers.shop.middlewares=shop-strip"
+      - "traefik.http.middlewares.shop-strip.stripprefix.prefixes=/shop"
+      - "traefik.http.services.shop.loadbalancer.server.port=80"
+      - "traefik.docker.network=${TRAEFIK_NETWORK:-traefik_proxy}"
+    networks:
+      - default
+      - traefik
+
+  backend:
+    build:
+      context: ./backend-php
+      dockerfile: ../docker/backend/Dockerfile
+    image: supermarket-backend:latest
+    env_file:
+      - backend-php/.env.docker
+    environment:
+      APP_KEY: ${APP_KEY:-base64:/jZayb6p3OtqHig6b6nrfNw7oofDksLLtWiOSfDwTWI=}
+      DB_HOST: db
+      DB_PORT: 5432
+      DB_DATABASE: ${DB_DATABASE:-supermarket}
+      DB_USERNAME: ${DB_USERNAME:-supermarket}
+      DB_PASSWORD: ${DB_PASSWORD:-supermarket}
+      CACHE_STORE: redis
+      REDIS_HOST: redis
+      REDIS_PORT: 6379
+    volumes:
+      - backend-storage:/var/www/html/storage
+      - backend-cache:/var/www/html/bootstrap/cache
+    ports:
+      - "8081:8000"
+    depends_on:
+      db:
+        condition: service_healthy
+      redis:
+        condition: service_started
+    restart: unless-stopped
+    labels:
+      - "traefik.enable=true"
+      - "traefik.http.routers.shop-api.rule=PathPrefix(`/api`)"
+      - "traefik.http.routers.shop-api.entrypoints=web"
+      - "traefik.http.services.shop-api.loadbalancer.server.port=8000"
+      - "traefik.docker.network=${TRAEFIK_NETWORK:-traefik_proxy}"
+    networks:
+      - default
+      - traefik
+
+  db:
+    image: postgres:15-alpine
+    environment:
+      POSTGRES_DB: ${DB_DATABASE:-supermarket}
+      POSTGRES_USER: ${DB_USERNAME:-supermarket}
+      POSTGRES_PASSWORD: ${DB_PASSWORD:-supermarket}
+    volumes:
+      - db-data:/var/lib/postgresql/data
+    ports:
+      - "5433:5432"
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${DB_USERNAME:-supermarket}"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    restart: unless-stopped
+
+  redis:
+    image: redis:7-alpine
+    command: ["redis-server", "--save", "", "--appendonly", "no"]
+    ports:
+      - "6379:6379"
+    restart: unless-stopped
+
+volumes:
+  backend-storage:
+  backend-cache:
+  db-data:
+  traefik-acme:
+    name: ${TRAEFIK_ACME_VOLUME:-traefik_acme}
+
+networks:
+  traefik:
+    external: true
+    name: ${TRAEFIK_NETWORK:-traefik_proxy}

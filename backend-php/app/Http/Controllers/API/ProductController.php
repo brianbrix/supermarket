@@ -6,6 +6,7 @@ use App\Http\Controllers\Controller;
 use App\Models\Product;
 use App\Http\Resources\ProductResource;
 use Illuminate\Http\Request;
+use Illuminate\Support\Facades\Cache;
 
 class ProductController extends Controller
 {
@@ -59,13 +60,27 @@ class ProductController extends Controller
 
     public function priceRange(Request $request)
     {
-        $query = Product::query();
-        // Optional: filter by category if provided, to get bounds for current category
         $categoryId = $request->get('categoryId');
-        if ($categoryId) { $query->where('category_id', (int)$categoryId); }
-        $min = (float)$query->min('price');
-        $max = (float)$query->max('price');
-        return response()->json(['min' => $min, 'max' => $max]);
+        $cacheKey = $categoryId
+            ? "products:price-range:category:" . (int) $categoryId
+            : 'products:price-range:all';
+
+        $range = Cache::remember($cacheKey, now()->addMinutes(10), function () use ($categoryId) {
+            $builder = Product::query();
+            if ($categoryId) {
+                $builder->where('category_id', (int) $categoryId);
+            }
+
+            $min = $builder->min('price');
+            $max = $builder->max('price');
+
+            return [
+                'min' => $min !== null ? (float) $min : 0.0,
+                'max' => $max !== null ? (float) $max : 0.0,
+            ];
+        });
+
+        return response()->json($range);
     }
 
     public function show(Product $product)
@@ -95,28 +110,40 @@ class ProductController extends Controller
         $anchorPrice = max((float) $product->price, 1.0);
         $categoryId = $product->category_id ?? 0;
 
-        $related = Product::query()
-            ->select('products.*')
-            ->where('products.id', '!=', $product->id)
-            ->with(['category', 'images'])
-            ->selectRaw(
-                '(CASE WHEN products.category_id = ? THEN ? ELSE 0 END)'
-                . ' + (1 - LEAST(ABS(products.price - ?) / ?, 1)) * ?'
-                . ' + (CASE WHEN products.stock > 0 THEN ? ELSE 0 END) AS relevance_score',
-                [
-                    $categoryId,
-                    $categoryWeight,
-                    (float) $product->price,
-                    $anchorPrice,
-                    $priceWeight,
-                    $stockWeight,
-                ]
-            )
-            ->orderByDesc('relevance_score')
-            ->orderByDesc('products.stock')
-            ->orderBy('products.price')
-            ->limit($limit)
-            ->get();
+        $cacheKey = sprintf('products:%d:related:%d:%s', $product->id, $limit, $product->updated_at?->timestamp ?? 0);
+
+        $related = Cache::remember($cacheKey, now()->addMinutes(5), function () use (
+            $product,
+            $limit,
+            $categoryId,
+            $categoryWeight,
+            $priceWeight,
+            $stockWeight,
+            $anchorPrice
+        ) {
+            return Product::query()
+                ->select('products.*')
+                ->where('products.id', '!=', $product->id)
+                ->with(['category', 'images'])
+                ->selectRaw(
+                    '(CASE WHEN products.category_id = ? THEN ?::numeric ELSE 0::numeric END)'
+                    . ' + (1 - LEAST(ABS(products.price - ?::numeric) / NULLIF(?::numeric, 0::numeric), 1)) * ?::numeric'
+                    . ' + (CASE WHEN products.stock > 0 THEN ?::numeric ELSE 0::numeric END) AS relevance_score',
+                    [
+                        $categoryId,
+                        $categoryWeight,
+                        (float) $product->price,
+                        $anchorPrice,
+                        $priceWeight,
+                        $stockWeight,
+                    ]
+                )
+                ->orderByDesc('relevance_score')
+                ->orderByDesc('products.stock')
+                ->orderBy('products.price')
+                ->limit($limit)
+                ->get();
+        });
 
         return ProductResource::collection($related);
     }

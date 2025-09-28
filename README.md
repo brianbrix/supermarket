@@ -1,236 +1,124 @@
-## KenSuper Monorepo – Front-end & Spring Boot Backend
+# KenSuper Monorepo (React + Laravel)
 
-This repository now contains BOTH the React front-end and the Spring Boot backend (API + admin utilities) in a single mono-repo structure:
+Modern Kenyan supermarket experience powered by a Vite/React SPA (`/src`) and a Laravel 10 API (`/backend-php`). This repository now ships with performance-focused front-end tweaks, cached recommendation queries, and a production-ready Docker Compose stack (frontend, backend, PostgreSQL, Redis).
 
+## 🚀 Key improvements in this update
+- **Route-based code splitting** – all major pages (admin, account, product detail, checkout) load on demand via `React.lazy`, shrinking the initial bundle served to shoppers.
+- **Fine-grained vendor chunking** – Vite build outputs separate vendor bundles per package, keeping revalidation efficient and letting HTTP/2 multiplex parallel downloads.
+- **On-demand PDF generation** – `pdfmake` loads only when a shopper exports a receipt, trimming the critical path payload by ~2 MB.
+- **Cached price bounds & related products** – Laravel now remembers expensive queries (category price ranges and related-product scoring) with Redis-backed caches to ease database load.
+- **Containerized stack** – Docker Compose spins up the web app, API, PostgreSQL 15, and Redis 7 with a single command.
+
+## 📁 Repository structure (partial)
 ```
-supermarket/
-  backend/   # Spring Boot (Maven, Java 21, Spring Boot 3.5.x)
-  src/       # React front-end source
-```
-
-The original lightweight UI (React + Vite) has been integrated with a real backend providing products, categories, orders, admin analytics and media uploads. Focus remains on a Kenyan retail context (KES currency, local product examples).
-
-### Features
-- Product listing (static sample data: unga, sukuma wiki, maziwa, mandazi)
-- Search by name/description + category + price range filter
-- Add to cart, adjust quantity, remove, clear (with toast notifications)
-- Multi-step checkout: details → simulated M-Pesa/Airtel payment → confirmation
-- Kenyan phone number validation & inline form errors
-- Optional query param `?returnTo=checkout` (add item then auto-navigate to checkout)
-- Cart summary with KES formatting
-- Simple routing: Home / Products / Cart / About / Checkout
-  - State persisted to localStorage (cart + theme)
-  - Checkout progress persisted in sessionStorage (resume if you refresh)
-  - Visual step indicator for checkout progress
-  - Per-field (on-blur) validation feedback
-  - Order confirmation: download text + PDF export + mock email trigger
-  - Dark mode toggle (respects system preference + persisted)
-  - Service abstraction layer (`orderService.js`) for payment + email mocks (future API hook)
-
-### Tech
-- React 19
-- Vite 7
-- React Router DOM 6
-- jsPDF (PDF export)
-- Context API (Cart / Toast / Theme)
-
-### Architecture & Services
-`orderService.js` encapsulates order-related async operations (currently mocked):
-- `generateOrderRef()` – deterministic per-session order reference
-- `initiatePayment({ method, amount })` – simulates mobile money payment (returns `paymentRef`)
-- `sendEmailMock(order)` – placeholder for future email integration
-
-Themes handled via `ThemeContext`:
-- Persists selection to `localStorage`
-- Applies `data-theme` attribute on `<html>` for CSS variable switching
-- Defaults to system `prefers-color-scheme` on first load
-
-### Prerequisites
-Node.js 20.19+ or 22.12+ (Vite 7 & some deps require modern Node). If you see engine warnings or startup errors on Node 16/18, upgrade using nvm:
-```
-nvm install 22
-nvm use 22
+.
+├── docker-compose.yml
+├── docker/
+│   ├── frontend/
+│   │   ├── Dockerfile      # Multi-stage Vite → Nginx build
+│   │   └── nginx.conf
+│   └── backend/
+│       └── Dockerfile      # Laravel worker using php:8.2-cli
+├── src/                    # React storefront + admin UI
+└── backend-php/            # Laravel API + Sanctum auth + PostgreSQL persistence
 ```
 
-### Run Front-end Dev Server
-```
+## 🛠 Prerequisites (manual setup)
+- Node.js 20.19+ or 22.x (`nvm install 22 && nvm use 22` recommended)
+- PHP 8.2 with Composer 2
+- PostgreSQL 15+
+- Redis 7 (optional locally, required for cache parity with Docker stack)
+
+## 🧪 Manual development workflow
+### Frontend
+```bash
+cd supermarket
 npm install
 npm run dev
 ```
-Visit the printed local URL (default http://localhost:5173 ).
-
-### Build & Preview (Front-end)
+Default dev server: <http://localhost:5173>. Configure the API origin via `.env`:
 ```
-npm run build
-npm run preview
+VITE_API_BASE_URL=http://localhost:8081/api
+VITE_BRAND_NAME=KenSuper
 ```
 
-### Repository Structure
+### Backend (Laravel)
+```bash
+cd supermarket/backend-php
+composer install
+php artisan migrate --seed
+php artisan serve --host=0.0.0.0 --port=8081
 ```
-backend/
-  pom.xml
-  src/main/java/... (controllers, services, repositories, dto, domain)
-  src/main/resources/
-  uploads/ (runtime image storage)
-src/
-  components/
-  pages/
-  context/
-  services/
-  data/
-  utils/
-```
+Copy `.env.example` to `.env` (or reuse `.env.docker`) and update database credentials. Redis improves cache hit rate but file cache works for local prototyping.
 
-### Future Ideas
-- Real backend / API integration (replace service mocks)
-- Authentication & real payment integration
-- Real product images
-- Inventory & stock levels
-- Order history & user accounts
-- Comprehensive unit & accessibility tests
-- PWA offline cart support
+Common optimization-friendly commands:
+- `php artisan optimize` – cache config/routes/views after adjusting `.env`
+- `php artisan test` – PHPUnit suite (requires configured database)
 
-### Notes
-Cart data is client-side only (localStorage). Replace sample data with live API when ready.
+## 🐳 Docker Compose quickstart
+1. Ensure Docker Desktop (or equivalent) is running.
+2. (Optional) Update `backend-php/.env.docker` with custom secrets/database values. A safe default `APP_KEY` is already present; override via environment if desired.
+3. (Optional) Launch the shared Traefik gateway as a standalone stack:
+   ```bash
+   cd supermarket/docker/traefik
+   docker compose up -d
+   ```
+   > **Note:** Traefik is now bundled inside the primary compose file, so this step is only needed if you prefer to run the gateway independently or reuse it across multiple repositories.
+4. Build and launch the full stack with Docker Compose (Traefik, frontend, backend, Postgres, Redis):
+   ```bash
+   cd supermarket
+   docker compose up --build
+   ```
+   Or use the helper script (handles the external Traefik network and optional build):
+   ```bash
+   ./scripts/start-services.sh        # build + start
+   ./scripts/start-services.sh --no-build
+   ```
+   - Frontend via Traefik: <http://localhost/shop>
+   - Backend API via Traefik: <http://localhost/api>
+   - Frontend direct port (bypassing Traefik): <http://localhost:8080>
+   - Backend API direct port: <http://localhost:8081/api>
+   - PostgreSQL: localhost:5433 (user/password: `supermarket`)
+   - Redis: localhost:6379
+   - Traefik dashboard (basic auth protected): <http://localhost/traefik>
+5. Apply database migrations inside the backend container (first run only):
+   ```bash
+   docker compose exec backend php artisan migrate --force
+   ```
 
-## Backend (Spring Boot) Overview
+### Compose environment knobs
+- `VITE_API_BASE_URL` build arg controls the API origin baked into the SPA (defaults to `http://backend:8000/api`). Override when deploying to a different host.
+- `VITE_BASE_PATH` adjusts the public path when serving the SPA behind a reverse proxy prefix (e.g. `/shop/`).
+- `DB_DATABASE`, `DB_USERNAME`, `DB_PASSWORD` bubble through to both services to keep credentials consistent.
+- `TRAEFIK_NETWORK` identifies the external network shared with your Traefik reverse proxy (defaults to `traefik_proxy`).
+- `TRAEFIK_ACME_VOLUME` customizes the persistent volume name used by the Traefik companion stack for certificate storage.
+- Set `APP_KEY` in your shell before `docker compose up` to rotate the Laravel encryption key without editing tracked files.
 
-Java 21 + Spring Boot 3.5.x. Main app class: `backend/src/main/java/com/example/supermarket/SupermarketBackendApplication.java`.
+### Traefik dashboard access
+- Default credential: `admin` / `change-me`
+- Update the hash in `docker/traefik/dashboard-users.htpasswd` using `htpasswd` or `openssl passwd -apr1 <new-password>` and redeploy.
+- In production, rotate credentials regularly and consider restricting `/traefik` with IP allow-lists or disabling the dashboard entirely.
 
-### Run Backend
-From repo root:
-```
-cd backend
-mvn spring-boot:run
-```
-Profiles: set `-Dspring.profiles.active=dev` as needed. Ensure PostgreSQL connection props are configured (env vars or `application.properties`).
+### Quick smoke test checklist
+1. Visit <http://localhost/shop> – the storefront should load via Traefik (200 status, no mixed content warnings).
+2. Add a product to the cart and continue to checkout to confirm API calls proxy correctly through `/api`.
+3. Navigate to <http://localhost/traefik>, authenticate with the default credential, and verify backends appear healthy; then change the password hash.
+4. (Optional) Hit the direct service ports (<http://localhost:8080>, <http://localhost:8081/api/health>) if you need to bypass Traefik for troubleshooting.
 
-### Build Backend Jar
-```
-cd backend
-mvn clean package -DskipTests
-java -jar target/supermarket-backend-0.0.1-SNAPSHOT.jar
-```
+## ✅ Verification checklist
+- `npm run build` (front-end) – confirms route-based chunking and pdfmake code splitting
+- `php artisan config:cache` (backend) – validates compiled configuration after env changes
+- `docker compose up --build` – container images build cleanly and services start
 
-### Environment Variable for Front-end
-Create `.env` in repo root:
-```
-VITE_API_BASE_URL=http://localhost:8080/api
-```
+## 📓 Release notes
+- Lazily load pdfmake in `Checkout.jsx` via dynamic `import()` (see `getPdfMake()` helper) to defer the 2 MB dependency until a receipt is exported.
+- Big query caching landed in `backend-php/app/Http/Controllers/API/ProductController.php` using `Cache::remember()` with Redis keys tied to product update timestamps.
+- Vite config now emits smaller vendor bundles (`vendor-react`, `vendor-router`, etc.) using a per-package `manualChunks` splitter.
+- Added Dockerfiles for both tiers plus a top-level `.dockerignore` to trim build contexts.
 
-The frontend now integrates with a Spring Boot backend providing real products, categories, orders and admin utilities.
+## ⚠️ Known gaps / next steps
+- Automated backend tests are currently skipped in CI; enable once Pest/PHPUnit fixtures are restored for PostgreSQL.
+- `pdfmake` still produces a ~2 MB async chunk; consider replacing with a lighter generator if mobile download size remains a concern.
+- The Laravel image runs `php artisan serve` for simplicity. Swap to `php-fpm` + Nginx for hardened production deployments.
 
-### Product Search Endpoint
-`GET /api/products/search`
-
-Query params (all optional):
-- `q` – free text (name/description partial, case-insensitive)
-- `categoryId` – numeric category id
-- `minPrice`, `maxPrice` – inclusive bounds
-- `inStock` – set to `true` to restrict to products with stock > 0
-
-Example:
-```
-/api/products/search?q=milk&minPrice=100&maxPrice=500&inStock=true
-```
-
-### Stock Handling
-- Each product has an integer `stock`.
-- Orders atomically decrement stock; insufficient stock rejects the order.
-- UI shows badges (Out / N left) and disables add-to-cart at zero.
-- Cart quantities clamp to available stock and warn via toast if exceeded.
-
-### Admin (Demo, Unsecured)
-Routes under `/api/admin` allow product CRUD, order listing & status updates, category CRUD, and dashboard stats. In production these must be secured (JWT/session, role checks) and possibly separated into public vs admin category endpoints.
-
-### Image Upload
-`POST /api/products/{id}/image` multipart field `file` – updates product `imageUrl` served from `/images/*`.
-
-### Categories
-Fetched from `GET /api/admin/categories` (public for demo). Each item: `{ id, name }`.
-
-### New Frontend Admin Screens
-- `/admin/products` – search, create/edit (with stock & optional image), delete.
-- `/admin/orders` – list orders and update status via dropdown.
-
-### Debounced Filtering UI
-The home page now uses debounced queries for text (500ms) and range/stock/category filters, calling the backend search endpoint instead of filtering client-side.
-
----
-> NOTE: Ensure environment variable `VITE_API_BASE_URL` points to the backend origin (e.g. `http://localhost:8080/api`).
-
-### Monorepo Notes
-- Backend build artifacts (`backend/target`) & runtime uploads are gitignored.
-- No git submodules remain; everything lives in this single repo.
-- To upgrade dependencies, treat each side independently (npm / Maven).
-
----
-Feel free to adapt and extend. Karibu! 🇰🇪
-
-## Payments & Mobile Money Configuration
-
-The backend now models payments with a flexible `Payment` entity plus configurable `PaymentOption` records an admin can manage. These options drive the checkout experience for mobile money automation.
-
-### Core Concepts
-- STK Push is treated as a capability (flag) layered on top of base channels rather than a distinct channel to configure.
-- Supported providers: `MPESA`, `AIRTEL`.
-- Supported configurable channels (after recent simplification):
-  - `MPESA_PAYBILL`
-  - `MPESA_TILL`
-  - `MPESA_P2P` (manual peer transfer – user sends to a phone number; no automated push)
-  - `MPESA_POCHI`
-  - `AIRTEL_COLLECTION`
-- Legacy shortcut channels (`MPESA_STK_PUSH`, `AIRTEL_STK_PUSH`) are still present in the enum for backward compatibility but should NOT be added as new options; prefer a base channel with `supportsStk = true`.
-- Removed: manual "send money" convenience channels (`MPESA_SEND_MONEY`, `AIRTEL_SEND_MONEY`). These flows are now considered part of the broader Cash On Delivery (COD) operational process instead of a separate configurable payment option.
-
-### STK Capability (`supportsStk`)
-Set `supportsStk=true` on a base channel when you want the backend to initiate an automated push (e.g. M-Pesa STK) instead of requiring the customer to key in a PayBill/Till manually. Applicable channels:
-`MPESA_PAYBILL`, `MPESA_TILL`, `AIRTEL_COLLECTION` (and legacy `*_STK_PUSH` if still in existing data).
-
-### Required Fields by Channel
-| Channel | Required Fields | Notes |
-|---------|-----------------|-------|
-| MPESA_PAYBILL | paybillNumber, (auto accountReferenceTemplate defaults to `ORDER-{orderId}` if blank) | May set `supportsStk=true` for automatic push |
-| MPESA_TILL | tillNumber, (auto accountReferenceTemplate defaults if provided blank) | May set `supportsStk=true` |
-| MPESA_P2P | recipientPhone | Manual send instructions only (no STK) |
-| MPESA_POCHI | recipientPhone | Manual send |
-| AIRTEL_COLLECTION | (none mandatory) | May set `supportsStk=true` |
-
-Fields on a `PaymentOption`:
-- `displayName` – UI label (e.g. "M-Pesa PayBill (Auto)").
-- `shortDescription` – concise badge/summary text.
-- `instructionsMarkdown` – multi-step guidance; supports Markdown (lists, bold, etc.). Provide manual steps when `supportsStk=false`.
-- `paybillNumber` / `tillNumber` / `recipientPhone` – channel specific identifiers.
-- `accountReferenceTemplate` – tokens: `{orderId}`, `{userId}`, `{total}`; resolved at initiation for structured statements.
-- `supportsStk` – enable automated STK push on eligible channels.
-- `sortOrder` – integer for display sorting.
-- `active` – whether exposed to checkout consumers.
-- `metadataJson` – arbitrary JSON string for future extensions (branding hints, regional tags, etc.).
-
-### Admin Management
-`/admin/payment-options` UI lets an authorized admin create/update/delete options. The channel selector excludes removed send money types and legacy `*_STK_PUSH` shortcuts.
-
-### Checkout Behavior
-- Frontend fetches active options and renders them with provider branding.
-- If `supportsStk=true`, initiation hits the automated push path (backend sets external request id & waits for callback / simulated flow).
-- If `supportsStk=false`, the instructions are shown and the payment record remains `INITIATED` until reconciled by callback/manual process.
-
-### Migration Notes
-If you had data rows using `MPESA_SEND_MONEY` or `AIRTEL_SEND_MONEY`, they should be retired. Keep historical Payments intact (enum constants removed from code; existing DB rows may need data migration to COD notes or archived). Consider running a DB update to map those historic rows to `method=CASH_ON_DELIVERY` with an audit note if necessary.
-
-## Documentation Change Log
-- 2025-09-25: Removed configurable send money channels; clarified STK capability and updated required field matrix.
-
-## Continuous Integration (CI)
-A lightweight GitHub Actions workflow (`.github/workflows/ci.yml`) builds both backend and frontend on pushes and pull requests to `dev` and `main`:
-- Backend job: JDK 21, Maven dependency cache, `mvn -DskipTests clean package` then `mvn test`.
-- Frontend job: Node 20 with npm cache, `npm ci` then `npm run build`.
-- Artifacts uploaded:
-  - `backend-jar` – Spring Boot re-packaged JAR
-  - `frontend-dist` – Production-ready Vite build output
-
-Extend ideas:
-- Add lint step (`npm run lint`, `mvn -q verify` with extra plugins)
-- Add Docker image build & push (use `actions/setup-buildx-action` + `docker/build-push-action`)
-- Add test matrix (multiple Java or Node versions) if compatibility becomes a concern
-- Integrate security scanning (Dependabot alerts, `mvn -DskipTests org.owasp:dependency-check:check`, `npm audit --audit-level=high`)
+Feel free to extend, localize, and build on top of these optimizations. Karibu! 🇰🇪

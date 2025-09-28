@@ -6,17 +6,32 @@ import { useCart } from '../context/CartContext.jsx';
 import { useToast } from '../context/ToastContext.jsx';
 import { useCurrencyFormatter } from '../context/SettingsContext.jsx';
 import QRCode from 'qrcode';
-import pdfMake from 'pdfmake/build/pdfmake';
-import pdfFonts from 'pdfmake/build/vfs_fonts';
-// Attach virtual file system fonts (handles different export shapes)
-pdfMake.vfs = (pdfFonts?.pdfMake?.vfs) || pdfFonts.vfs || pdfMake.vfs;
 import ProgressSteps from '../components/ProgressSteps.jsx';
 import { generateOrderRef, sendEmailMock } from '../services/orderService.js';
 import { useMobileMoneyPayment } from '../hooks/useMobileMoneyPayment.js';
 import PaymentOptionModal from '../components/PaymentOptionModal.jsx';
 import { paymentBranding, api } from '../services/api.js';
+import { BRAND_COPY_FOOTER, BRAND_RECEIPT_TITLE } from '../config/brand.js';
 import { useAuth } from '../context/AuthContext.jsx';
 import { appendGuestOrder, ensureGuestSessionId } from '../utils/guestOrders.js';
+
+let pdfMakePromise;
+
+async function getPdfMake() {
+  if (!pdfMakePromise) {
+    pdfMakePromise = Promise.all([
+      import('pdfmake/build/pdfmake'),
+      import('pdfmake/build/vfs_fonts'),
+    ]).then(([pdfMakeModule, pdfFontsModule]) => {
+      const pdfMake = pdfMakeModule.default || pdfMakeModule;
+      const fonts = pdfFontsModule.default || pdfFontsModule;
+      const resolvedVfs = fonts?.pdfMake?.vfs || fonts?.vfs || pdfMake.vfs;
+      pdfMake.vfs = resolvedVfs;
+      return pdfMake;
+    });
+  }
+  return pdfMakePromise;
+}
 
 function buildCartSignature(list) {
   if (!Array.isArray(list) || list.length === 0) return '';
@@ -628,6 +643,7 @@ export default function Checkout() {
       snap = { ...snap, subtotal: net, vat: vatPortion };
     }
     try {
+      const pdfMake = await getPdfMake();
 
       // Generate QR code (data URL) with minimal payload
       let qrDataUrl = '';
@@ -715,7 +731,7 @@ export default function Checkout() {
         defaultStyle: { fontSize: 9 }
       };
 
-  pdfMake.createPdf(docDefinition).download(`receipt-${fileSafeOrderRef}.pdf`);
+      pdfMake.createPdf(docDefinition).download(`receipt-${fileSafeOrderRef}.pdf`);
       push('Receipt PDF downloaded');
     } catch (err) {
       console.error('PDF export failed', err);

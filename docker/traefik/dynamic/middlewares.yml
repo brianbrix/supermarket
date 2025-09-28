@@ -1,0 +1,23 @@
+http:
+  middlewares:
+    compress-response:
+      compress: {}
+    secure-headers:
+      headers:
+        stsSeconds: 15552000
+        stsIncludeSubdomains: true
+        stsPreload: true
+        referrerPolicy: "no-referrer-when-downgrade"
+        contentSecurityPolicy: "default-src 'self'"
+        accessControlAllowMethods:
+          - GET
+          - OPTIONS
+          - POST
+          - PUT
+          - DELETE
+        accessControlAllowOriginList:
+          - "*"
+        addVaryHeader: true
+    dashboard-auth:
+      basicAuth:
+        usersFile: /etc/traefik/dashboard-users.htpasswd

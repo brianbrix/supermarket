@@ -122,11 +122,13 @@ export const api = {
     stats: () => request('/admin/dashboard/stats'),
     recentOrders: (limit=10) => request(`/admin/dashboard/recent-orders?limit=${limit}`),
     analytics: {
-      overview: ({ lowStockThreshold = 5, revenueDays = 30 } = {}) => {
+      overview: ({ rangeDays = 30, from, to } = {}) => {
         const params = new URLSearchParams();
-        if (lowStockThreshold != null) params.set('lowStockThreshold', lowStockThreshold);
-        if (revenueDays != null) params.set('revenueDays', revenueDays);
-        return request(`/admin/analytics/overview?${params.toString()}`);
+        if (rangeDays != null) params.set('rangeDays', rangeDays);
+        if (from) params.set('from', from);
+        if (to) params.set('to', to);
+        const qs = params.toString();
+        return request(`/admin/analytics/overview${qs ? `?${qs}` : ''}`);
       },
       aov: ({ granularity = 'DAILY', periods } = {}) => {
         const params = new URLSearchParams();

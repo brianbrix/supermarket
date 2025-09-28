@@ -1,31 +1,30 @@
 import { BrowserRouter, Routes, Route, Navigate } from 'react-router-dom';
-import { useEffect, useRef } from 'react';
+import { useEffect, useRef, lazy, Suspense } from 'react';
 import Navbar from './components/Navbar.jsx';
 import Footer from './components/Footer.jsx';
 import MobileCartBar from './components/MobileCartBar.jsx';
-import Home from './pages/Home.jsx';
-import Products from './pages/Products.jsx';
-import Cart from './pages/Cart.jsx';
-import Checkout from './pages/Checkout.jsx';
-import ProductDetail from './pages/ProductDetail.jsx';
-import About from './pages/About.jsx';
-import AdminProducts from './pages/admin/AdminProducts.jsx';
-import AdminOrders from './pages/admin/AdminOrders.jsx';
-import AdminDashboard from './pages/admin/AdminDashboard.jsx';
-import AdminPayments from './pages/admin/AdminPayments.jsx';
-import AdminAnalytics from './pages/admin/AdminAnalytics.jsx';
-import AdminCategories from './pages/admin/AdminCategories.jsx';
-import AdminUsers from './pages/admin/AdminUsers.jsx';
-import AdminLayout from './components/admin/AdminLayout.jsx';
-import AdminLogin from './pages/admin/AdminLogin.jsx';
-import CustomerLogin from './pages/CustomerLogin.jsx';
-import Register from './pages/Register.jsx';
-import Orders from './pages/Orders.jsx';
-import AdminPaymentOptions from './pages/admin/AdminPaymentOptions.jsx';
-import AdminSystemSettings from './pages/admin/AdminSystemSettings.jsx';
-import AccountLayout from './pages/account/AccountLayout.jsx';
-import Profile from './pages/account/Profile.jsx';
-import AccountSettings from './pages/account/AccountSettings.jsx';
+const Home = lazy(() => import('./pages/Home.jsx'));
+const Cart = lazy(() => import('./pages/Cart.jsx'));
+const Checkout = lazy(() => import('./pages/Checkout.jsx'));
+const ProductDetail = lazy(() => import('./pages/ProductDetail.jsx'));
+const About = lazy(() => import('./pages/About.jsx'));
+const Orders = lazy(() => import('./pages/Orders.jsx'));
+const AdminLayout = lazy(() => import('./components/admin/AdminLayout.jsx'));
+const AdminProducts = lazy(() => import('./pages/admin/AdminProducts.jsx'));
+const AdminOrders = lazy(() => import('./pages/admin/AdminOrders.jsx'));
+const AdminDashboard = lazy(() => import('./pages/admin/AdminDashboard.jsx'));
+const AdminPayments = lazy(() => import('./pages/admin/AdminPayments.jsx'));
+const AdminAnalytics = lazy(() => import('./pages/admin/AdminAnalytics.jsx'));
+const AdminCategories = lazy(() => import('./pages/admin/AdminCategories.jsx'));
+const AdminUsers = lazy(() => import('./pages/admin/AdminUsers.jsx'));
+const AdminPaymentOptions = lazy(() => import('./pages/admin/AdminPaymentOptions.jsx'));
+const AdminSystemSettings = lazy(() => import('./pages/admin/AdminSystemSettings.jsx'));
+const AdminLogin = lazy(() => import('./pages/admin/AdminLogin.jsx'));
+const CustomerLogin = lazy(() => import('./pages/CustomerLogin.jsx'));
+const Register = lazy(() => import('./pages/Register.jsx'));
+const AccountLayout = lazy(() => import('./pages/account/AccountLayout.jsx'));
+const Profile = lazy(() => import('./pages/account/Profile.jsx'));
+const AccountSettings = lazy(() => import('./pages/account/AccountSettings.jsx'));
 import { CartProvider } from './context/CartContext.jsx';
 import { ToastProvider } from './context/ToastContext.jsx';
 import { ThemeProvider, useTheme } from './context/ThemeContext.jsx';
@@ -48,19 +47,23 @@ function RequireAuth({ children }) {
 }
 
 export default function App() {
+  const baseUrl = (import.meta.env.BASE_URL ?? '/').replace(/\/$/, '');
+  const routerBaseName = baseUrl === '/' ? '' : baseUrl;
+
   return (
     <SettingsProvider>
       <ThemeProvider>
         <SettingsHydrator />
         <ToastProvider>
           <CartProvider>
-            <BrowserRouter>
+            <BrowserRouter basename={routerBaseName}>
               <AuthProvider>
                 <AuthConfigurator />
                 <div className="layout">
                   <Navbar />
                   <main>
-                    <Routes>
+                    <Suspense fallback={<RouteFallback />}>
+                      <Routes>
                     <Route path="/" element={<Home />} />
                     <Route path="/products" element={<Home />} />
                     <Route path="/cart" element={<Cart />} />
@@ -89,7 +92,8 @@ export default function App() {
                       </Route>
                       <Route path="/profile" element={<Navigate to="/account/profile" replace />} />
                       <Route path="/settings" element={<Navigate to="/account/settings" replace />} />
-                    </Routes>
+                      </Routes>
+                    </Suspense>
                   </main>
                   <Footer />
                   <MobileCartBar />
@@ -100,6 +104,15 @@ export default function App() {
         </ToastProvider>
       </ThemeProvider>
     </SettingsProvider>
+  );
+}
+
+function RouteFallback() {
+  return (
+    <div className="page-loading d-flex align-items-center justify-content-center py-5" aria-live="polite">
+      <div className="spinner-border text-success me-3" role="status" aria-hidden="true"></div>
+      <span className="fw-medium">Loading…</span>
+    </div>
   );
 }
 
