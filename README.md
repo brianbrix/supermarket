@@ -64,7 +64,7 @@ Common optimization-friendly commands:
    docker compose up -d
    ```
    > **Note:** Traefik is now bundled inside the primary compose file, so this step is only needed if you prefer to run the gateway independently or reuse it across multiple repositories.
-4. Build and launch the full stack with Docker Compose (Traefik, frontend, backend, Postgres, Redis):
+4. Build and launch the full stack with Docker Compose (frontend, backend, Postgres, Redis, optional Traefik helper):
    ```bash
    cd supermarket
    docker compose up --build
@@ -74,10 +74,8 @@ Common optimization-friendly commands:
    ./scripts/start-services.sh        # build + start
    ./scripts/start-services.sh --no-build
    ```
-   - Frontend via Traefik: <http://localhost/shop>
-   - Backend API via Traefik: <http://localhost/api>
-   - Frontend direct port (bypassing Traefik): <http://localhost:8080>
-   - Backend API direct port: <http://localhost:8081/api>
+   - Frontend SPA: <http://localhost:8080>
+   - Backend API: <http://localhost:8081/api>
    - PostgreSQL: localhost:5433 (user/password: `supermarket`)
    - Redis: localhost:6379
    - Traefik dashboard (basic auth protected): <http://localhost/traefik>
@@ -87,23 +85,23 @@ Common optimization-friendly commands:
    ```
 
 ### Compose environment knobs
-- `VITE_API_BASE_URL` build arg controls the API origin baked into the SPA (defaults to `/api`, which resolves through Traefik). Override to `http://localhost:8081/api` during local dev when bypassing the proxy.
+- `VITE_API_BASE_URL` build arg overrides the API origin baked into the SPA. Runtime defaults detect port `8080` and automatically target `http://<host>:8081/api`, so you can usually leave this unset unless pointing at an external API host.
 - `VITE_BASE_PATH` adjusts the public path when serving the SPA behind a reverse proxy prefix (e.g. `/shop/`).
 - `DB_DATABASE`, `DB_USERNAME`, `DB_PASSWORD` bubble through to both services to keep credentials consistent.
 - `TRAEFIK_NETWORK` identifies the external network shared with your Traefik reverse proxy (defaults to `traefik_proxy`).
 - `TRAEFIK_ACME_VOLUME` customizes the persistent volume name used by the Traefik companion stack for certificate storage.
 - Set `APP_KEY` in your shell before `docker compose up` to rotate the Laravel encryption key without editing tracked files.
 
-### Traefik dashboard access
+### Traefik dashboard access (optional helper)
 - Default credential: `admin` / `change-me`
 - Update the hash in `docker/traefik/dashboard-users.htpasswd` using `htpasswd` or `openssl passwd -apr1 <new-password>` and redeploy.
-- In production, rotate credentials regularly and consider restricting `/traefik` with IP allow-lists or disabling the dashboard entirely.
+- When you’re ready to front the stack with real domains, add Traefik routers (or another reverse proxy) that map your hostnames to ports 8080 (frontend) and 8081 (API).
 
 ### Quick smoke test checklist
-1. Visit <http://localhost/shop> – the storefront should load via Traefik (200 status, no mixed content warnings).
-2. Add a product to the cart and continue to checkout to confirm API calls proxy correctly through `/api`.
-3. Navigate to <http://localhost/traefik>, authenticate with the default credential, and verify backends appear healthy; then change the password hash.
-4. (Optional) Hit the direct service ports (<http://localhost:8080>, <http://localhost:8081/api/health>) if you need to bypass Traefik for troubleshooting.
+1. Visit <http://localhost:8080> – the storefront should load (200 status, no mixed content warnings).
+2. Add a product to the cart and continue to checkout to confirm API calls reach <http://localhost:8081/api>.
+3. (Optional) Navigate to <http://localhost/traefik>, authenticate with the default credential, and confirm any custom routers you configure for domain mappings.
+4. (Optional) When you map real domains, update Traefik (or your proxy) to route the hostnames to ports 8080 and 8081 respectively, then re-run the smoke test.
 
 ## ✅ Verification checklist
 - `npm run build` (front-end) – confirms route-based chunking and pdfmake code splitting

@@ -5,8 +5,20 @@
 // http://localhost:5173/images/xyz.png and 404. We therefore derive the API origin (scheme+host[:port])
 // and prefix any leading-slash image paths before rendering.
 const runtimeDefaultBase = (() => {
-  if (import.meta.env?.DEV) return 'http://localhost:8081/api';
-  if (typeof window !== 'undefined') return `${window.location.origin}/api`;
+  if (import.meta.env?.DEV) {
+    return 'http://localhost:8081/api';
+  }
+  if (typeof window !== 'undefined') {
+    const url = new URL(window.location.href);
+    const { protocol, hostname, port } = url;
+    if (port === '8080') {
+      return `${protocol}//${hostname}:8081/api`;
+    }
+    if (!port || port === '80' || port === '443') {
+      return `${url.origin}/api`;
+    }
+    return `${protocol}//${hostname}:${port}/api`;
+  }
   return '/api';
 })();
 

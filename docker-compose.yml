@@ -32,7 +32,7 @@ services:
       context: .
       dockerfile: docker/frontend/Dockerfile
       args:
-        VITE_API_BASE_URL: ${VITE_API_BASE_URL:-/api}
+        VITE_API_BASE_URL: ${VITE_API_BASE_URL:-""}
         VITE_BASE_PATH: ${VITE_BASE_PATH:-/}
     image: supermarket-frontend:latest
     depends_on:
@@ -41,17 +41,8 @@ services:
     ports:
       - "8080:80"
     restart: unless-stopped
-    labels:
-      - "traefik.enable=true"
-      - "traefik.http.routers.shop.rule=PathPrefix(`/shop`)"
-      - "traefik.http.routers.shop.entrypoints=web"
-      - "traefik.http.routers.shop.middlewares=shop-strip"
-      - "traefik.http.middlewares.shop-strip.stripprefix.prefixes=/shop"
-      - "traefik.http.services.shop.loadbalancer.server.port=80"
-      - "traefik.docker.network=${TRAEFIK_NETWORK:-traefik_proxy}"
     networks:
       - default
-      - traefik
 
   backend:
     build:
@@ -81,15 +72,8 @@ services:
       redis:
         condition: service_started
     restart: unless-stopped
-    labels:
-      - "traefik.enable=true"
-      - "traefik.http.routers.shop-api.rule=PathPrefix(`/api`)"
-      - "traefik.http.routers.shop-api.entrypoints=web"
-      - "traefik.http.services.shop-api.loadbalancer.server.port=8000"
-      - "traefik.docker.network=${TRAEFIK_NETWORK:-traefik_proxy}"
     networks:
       - default
-      - traefik
 
   db:
     image: postgres:15-alpine
