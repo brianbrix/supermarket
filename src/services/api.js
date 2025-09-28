@@ -4,7 +4,13 @@
 // frontend (running on a different dev origin, e.g. http://localhost:5173) would otherwise request
 // http://localhost:5173/images/xyz.png and 404. We therefore derive the API origin (scheme+host[:port])
 // and prefix any leading-slash image paths before rendering.
-const BASE_URL = import.meta.env.VITE_API_BASE_URL || 'http://localhost:8081/api';
+const runtimeDefaultBase = (() => {
+  if (import.meta.env?.DEV) return 'http://localhost:8081/api';
+  if (typeof window !== 'undefined') return `${window.location.origin}/api`;
+  return '/api';
+})();
+
+const BASE_URL = import.meta.env.VITE_API_BASE_URL || runtimeDefaultBase;
 // Derive origin by stripping a trailing /api (with optional slash) if present
 const API_ORIGIN = BASE_URL.replace(/\/$/, '').replace(/\/api$/, '');
 

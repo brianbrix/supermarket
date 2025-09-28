@@ -87,7 +87,7 @@ Common optimization-friendly commands:
    ```
 
 ### Compose environment knobs
-- `VITE_API_BASE_URL` build arg controls the API origin baked into the SPA (defaults to `http://backend:8000/api`). Override when deploying to a different host.
+- `VITE_API_BASE_URL` build arg controls the API origin baked into the SPA (defaults to `/api`, which resolves through Traefik). Override to `http://localhost:8081/api` during local dev when bypassing the proxy.
 - `VITE_BASE_PATH` adjusts the public path when serving the SPA behind a reverse proxy prefix (e.g. `/shop/`).
 - `DB_DATABASE`, `DB_USERNAME`, `DB_PASSWORD` bubble through to both services to keep credentials consistent.
 - `TRAEFIK_NETWORK` identifies the external network shared with your Traefik reverse proxy (defaults to `traefik_proxy`).
