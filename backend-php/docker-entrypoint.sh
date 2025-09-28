@@ -25,4 +25,8 @@ for attempt in $(seq 1 "${MIGRATION_ATTEMPTS}"); do
   sleep "${MIGRATION_RETRY_DELAY}"
 done
 
+# Run database seeding
+echo "[backend-entrypoint] Running database seeders..."
+php artisan db:seed --force
+
 exec "$@"

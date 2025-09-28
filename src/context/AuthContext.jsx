@@ -31,6 +31,7 @@ export function AuthProvider({ children }) {
     if (user) localStorage.setItem('auth_user', JSON.stringify(user)); else localStorage.removeItem('auth_user');
   }, [user]);
 
+  const isAdminRole = useCallback((role) => role === 'ADMIN', []);
   const login = useCallback(async (identifier, password) => {
     try {
       const res = await api.auth.login({ identifier, password });
@@ -38,13 +39,13 @@ export function AuthProvider({ children }) {
   const u = res.user;
       setUser(u);
       push('Logged in', 'info');
-      if (u?.role && u.role !== 'CUSTOMER') navigate('/admin/dashboard'); else navigate('/');
+      if (isAdminRole(u?.role)) navigate('/admin/dashboard'); else navigate('/');
       return true;
     } catch (e) {
       push(e.message || 'Login failed', 'error');
       return false;
     }
-  }, [navigate, push]);
+  }, [navigate, push, isAdminRole]);
 
   const register = useCallback(async (form) => {
     try {
@@ -130,7 +131,7 @@ export function AuthProvider({ children }) {
     register,
     logout,
     isAuthenticated: !!token,
-    isAdmin: !!user && user.role && user.role !== 'CUSTOMER',
+  isAdmin: !!user && isAdminRole(user.role),
     isCustomer: !!user && user.role === 'CUSTOMER',
     changePassword,
     refreshProfile,
