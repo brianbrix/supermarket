@@ -37,7 +37,7 @@ RUN mkdir -p \
     && php artisan package:discover --ansi \
     && chown -R www-data:www-data storage bootstrap/cache
 
-COPY entrypoint.sh /entrypoint.sh
+COPY docker-entrypoint.sh /entrypoint.sh
 RUN chmod +x /entrypoint.sh
 
 USER www-data

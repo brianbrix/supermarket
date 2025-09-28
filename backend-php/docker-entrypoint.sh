@@ -3,13 +3,11 @@ set -euo pipefail
 
 cd /var/www/html
 
-# Ensure we have an application key if one wasn't injected via environment variables.
 if [[ -z "${APP_KEY:-}" || "${APP_KEY}" == "base64:placeholder" ]]; then
   echo "[backend-entrypoint] Generating APP_KEY..."
   export APP_KEY="$(php artisan key:generate --show | tr -d '\r')"
 fi
 
-# Run database migrations with retries to accommodate slow database startups.
 MIGRATION_ATTEMPTS=${MIGRATION_ATTEMPTS:-10}
 MIGRATION_RETRY_DELAY=${MIGRATION_RETRY_DELAY:-5}
 
@@ -27,5 +25,4 @@ for attempt in $(seq 1 "${MIGRATION_ATTEMPTS}"); do
   sleep "${MIGRATION_RETRY_DELAY}"
 done
 
-# Execute the container's main command.
 exec "$@"
