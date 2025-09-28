@@ -69,7 +69,7 @@ export default function Navbar() {
                 </NavLink>
               </li>
             )}
-            {isAdmin && (
+            {isAuthenticated && isAdmin && (
               <li className="nav-item">
                 <NavLink className={({isActive})=>`nav-link px-3 d-flex align-items-center gap-1${isActive?' active fw-semibold':''}`} to="/admin/dashboard" onClick={handleNavClick}>
                   <i className="bi bi-speedometer2"></i><span>Admin</span>
