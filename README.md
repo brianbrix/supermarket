@@ -75,7 +75,7 @@ Common optimization-friendly commands:
    ./scripts/start-services.sh --no-build
    ./scripts/start-services.sh --no-traefik
    ```
-   > The helper script ensures the `${TRAEFIK_NETWORK}` external network exists before launching the Traefik stack. Backend logs stream to container stderr (`LOG_CHANNEL=stderr`), so `docker compose logs backend` shows Laravel errors.
+   > The helper script ensures the `${TRAEFIK_NETWORK}` external network exists before launching the Traefik stack.
    - Frontend SPA (+ proxied API): <http://localhost:8080>
    - Backend API direct port: <http://localhost:8081/api>
    - PostgreSQL: localhost:5433 (user/password: `supermarket`)
@@ -93,6 +93,7 @@ Common optimization-friendly commands:
 - `DB_DATABASE`, `DB_USERNAME`, `DB_PASSWORD` bubble through to both services to keep credentials consistent.
 - `TRAEFIK_NETWORK` identifies the external network shared with your Traefik reverse proxy (defaults to `traefik_proxy`).
 - `TRAEFIK_ACME_VOLUME` customizes the persistent volume name used by the Traefik companion stack for certificate storage.
+- `BACKEND_LOG_PATH` sets the host directory that receives Laravel log files (defaults to `/var/log/supermarket-backend`). Create it with writable permissions before starting the stack, or override the path in your shell.
 - Set `APP_KEY` in your shell before `docker compose up` to rotate the Laravel encryption key without editing tracked files.
 
 ### Traefik dashboard access (optional helper)
