@@ -2,9 +2,10 @@ import { useCart } from '../context/CartContext.jsx';
 import { formatKES } from '../utils/currency.js';
 import { useNavigate, Link } from 'react-router-dom';
 import QuantityStepper from '../components/QuantityStepper.jsx';
+import CouponBox from '../components/CouponBox.jsx';
 
 export default function Cart() {
-  const { items, updateQty, removeItem, clearCart, total } = useCart();
+  const { items, updateQty, removeItem, clearCart, subtotal, discount, total } = useCart();
   const navigate = useNavigate();
   if (!items.length) return (
     <section className="container py-4">
@@ -77,12 +78,26 @@ export default function Cart() {
       </div>
 
       <div className="card mt-4 shadow-sm">
-        <div className="card-body d-flex flex-column flex-md-row align-items-md-center gap-3">
-          <div>
-            <p className="total mb-0">Total: {formatKES(total)}</p>
-            <p className="text-muted small mb-0">Taxes included where applicable.</p>
+        <div className="card-body d-flex flex-column gap-3">
+          <CouponBox compact className="w-100" />
+          <div className="border rounded p-3 bg-body-secondary-subtle">
+            <div className="d-flex justify-content-between small">
+              <span>Subtotal</span>
+              <span>{formatKES(subtotal)}</span>
+            </div>
+            {discount > 0 && (
+              <div className="d-flex justify-content-between text-success small fw-semibold mt-1">
+                <span>Coupon savings</span>
+                <span>-{formatKES(discount)}</span>
+              </div>
+            )}
+            <div className="d-flex justify-content-between fw-semibold mt-2">
+              <span>Total</span>
+              <span>{formatKES(total)}</span>
+            </div>
+            <p className="text-muted small mb-0 mt-1">Taxes included where applicable.</p>
           </div>
-          <div className="d-flex flex-column flex-sm-row flex-grow-1 justify-content-end gap-2 ms-md-auto">
+          <div className="d-flex flex-column flex-sm-row flex-grow-1 justify-content-end gap-2">
             <button onClick={()=>navigate('/checkout')} className="btn btn-success flex-grow-1" aria-label="Proceed to checkout">Proceed to Checkout</button>
             <Link to="/products" className="btn btn-outline-secondary flex-grow-1">
               Continue shopping

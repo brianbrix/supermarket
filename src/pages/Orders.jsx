@@ -48,8 +48,13 @@ export default function Orders(){
     const fallbackTotal = mappedItems.reduce((sum, i) => sum + (Number.isFinite(i.price) ? i.price : 0) * i.qty, 0);
     const subtotal = Number(snapshot?.subtotal ?? o.totalNet ?? o.total_net ?? fallbackTotal);
     const vatAmount = Number(snapshot?.vat ?? o.vatAmount ?? o.vat_amount ?? 0);
-  const total = Number(snapshot?.total ?? o.totalGross ?? o.total_gross ?? fallbackTotal);
-  const createdAtMs = o.createdAt ? new Date(o.createdAt).getTime() : (snapshot?.ts ?? Date.now());
+    const total = Number(snapshot?.total ?? o.totalGross ?? o.total_gross ?? fallbackTotal);
+    const discountAmount = Number(snapshot?.discount ?? snapshot?.discountAmount ?? o.discountAmount ?? o.discount_amount ?? 0);
+    const totalBeforeDiscount = Number(
+      snapshot?.totalBeforeDiscount ?? snapshot?.total_before_discount ?? o.totalBeforeDiscount ?? o.total_before_discount ?? (total + discountAmount)
+    );
+    const couponCode = snapshot?.couponCode ?? o.couponCode ?? o.coupon_code ?? null;
+    const createdAtMs = o.createdAt ? new Date(o.createdAt).getTime() : (snapshot?.ts ?? Date.now());
     const backendRef = o.orderNumber ?? o.order_number ?? o.reference ?? null;
     const guestRef = snapshot?.orderRef || snapshot?.id || (snapshot?.ts ? `guest-${snapshot.ts}` : `guest-${createdAtMs}`);
     const displayRef = backendRef ?? o.orderRef ?? (o.id != null ? `#${o.id}` : guestRef);
@@ -67,7 +72,10 @@ export default function Orders(){
         items: mappedItems.length > 0 ? mappedItems : (Array.isArray(snapshot?.items) ? snapshot.items : []),
         subtotal,
         vat: vatAmount,
-        total
+        total,
+        discount: discountAmount,
+        totalBeforeDiscount,
+        couponCode
       },
       customer: {
         ...(o.customer ?? {}),

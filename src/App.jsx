@@ -18,6 +18,7 @@ const AdminAnalytics = lazy(() => import('./pages/admin/AdminAnalytics.jsx'));
 const AdminCategories = lazy(() => import('./pages/admin/AdminCategories.jsx'));
 const AdminUsers = lazy(() => import('./pages/admin/AdminUsers.jsx'));
 const AdminPaymentOptions = lazy(() => import('./pages/admin/AdminPaymentOptions.jsx'));
+const AdminCoupons = lazy(() => import('./pages/admin/AdminCoupons.jsx'));
 const AdminSystemSettings = lazy(() => import('./pages/admin/AdminSystemSettings.jsx'));
 const AdminLogin = lazy(() => import('./pages/admin/AdminLogin.jsx'));
 const CustomerLogin = lazy(() => import('./pages/CustomerLogin.jsx'));
@@ -82,6 +83,7 @@ export default function App() {
                       <Route path="payments" element={<AdminPayments />} />
                       <Route path="analytics" element={<AdminAnalytics />} />
                       <Route path="categories" element={<AdminCategories />} />
+                      <Route path="coupons" element={<AdminCoupons />} />
                       <Route path="payment-options" element={<AdminPaymentOptions />} />
                       <Route path="system-settings" element={<AdminSystemSettings />} />
                     </Route>

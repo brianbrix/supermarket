@@ -9,6 +9,7 @@ use App\Models\Product;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Auth;
+use App\Services\CouponService;
 
 class OrderController extends Controller
 {
@@ -29,6 +30,9 @@ class OrderController extends Controller
                 'status' => $order->status,
                 'orderNumber' => $order->order_number,
                 'totalGross' => (float)$order->total_gross,
+                'totalBeforeDiscount' => (float)($order->total_gross + $order->discount_amount),
+                'discountAmount' => (float)$order->discount_amount,
+                'couponCode' => $order->coupon_code,
                 'totalNet' => (float)$order->total_net,
                 'vatAmount' => (float)$order->vat_amount,
                 'createdAt' => optional($order->created_at)->toIso8601String(),
@@ -75,25 +79,30 @@ class OrderController extends Controller
 
     public function show(Order $order) {
         $order->load(['items.product']);
+        $order->setAttribute('discountAmount', (float)$order->discount_amount);
+        $order->setAttribute('couponCode', $order->coupon_code);
+        $order->setAttribute('totalBeforeDiscount', (float)($order->total_gross + $order->discount_amount));
         return $order;
     }
 
-    public function store(Request $request) {
+    public function store(Request $request, CouponService $couponService) {
         // accept both camelCase and snake_case just in case
         $request->merge([
             'customer_name' => $request->input('customer_name') ?? $request->input('customerName'),
             'customer_phone' => $request->input('customer_phone') ?? $request->input('customerPhone'),
+            'coupon_code' => $request->input('coupon_code') ?? $request->input('couponCode'),
         ]);
         $data = $request->validate([
             'customerName' => 'required|string|max:255',
             'customerPhone' => 'required|string|max:32',
             'items' => 'required|array|min:1',
             'items.*.productId' => 'required|integer|exists:products,id',
-            'items.*.quantity' => 'required|integer|min:1'
+            'items.*.quantity' => 'required|integer|min:1',
+            'couponCode' => 'nullable|string|max:64'
         ]);
 
         $vatRate = 0.16; // Align with frontend constant
-        return DB::transaction(function() use ($data, $vatRate, $request) {
+        return DB::transaction(function() use ($data, $vatRate, $request, $couponService) {
             $grossTotal = 0; $netTotal = 0; $vatTotal = 0;
             $authUser = $request->user('sanctum') ?? Auth::user();
             $order = Order::create([
@@ -102,6 +111,7 @@ class OrderController extends Controller
                 'status' => 'PENDING',
                 'user_id' => $authUser?->id,
                 'total_gross' => 0,
+                'discount_amount' => 0,
                 'total_net' => 0,
                 'vat_amount' => 0,
             ]);
@@ -131,13 +141,50 @@ class OrderController extends Controller
                     $product->save();
                 }
             }
+
+            $coupon = null;
+            $discountAmount = 0.0;
+            $couponCode = $request->input('couponCode') ?? $request->input('coupon_code');
+            if ($couponCode) {
+                [$coupon, $discountAmount] = $couponService->validateForCart(
+                    $couponCode,
+                    (float)$grossTotal,
+                    $authUser,
+                    $data['customerPhone'] ?? null
+                );
+            }
+
+            $grossTotal = round($grossTotal, 2);
+            $netTotal = round($netTotal, 2);
+            $vatTotal = round($vatTotal, 2);
+
+            $discountAmount = min(round($discountAmount, 2), $grossTotal);
+            $ratio = $grossTotal > 0 ? ($discountAmount / $grossTotal) : 0;
+            $netDiscount = round($netTotal * $ratio, 2);
+            $vatDiscount = round($vatTotal * $ratio, 2);
+
+            $grossAfter = round($grossTotal - $discountAmount, 2);
+            $netAfter = round(max($netTotal - $netDiscount, 0), 2);
+            $vatAfter = round(max($vatTotal - $vatDiscount, 0), 2);
+
             $order->update([
-                'total_gross' => round($grossTotal,2),
-                'total_net' => round($netTotal,2),
-                'vat_amount' => round($vatTotal,2)
+                'total_gross' => $grossAfter,
+                'discount_amount' => $discountAmount,
+                'total_net' => $netAfter,
+                'vat_amount' => $vatAfter,
+                'coupon_id' => $coupon?->id,
+                'coupon_code' => $coupon?->code,
             ]);
+
+            if ($coupon && $discountAmount > 0) {
+                $couponService->recordRedemption($coupon, $discountAmount, $order->fresh(), $authUser, $data['customerPhone'] ?? null);
+            }
+
             $order->load(['items.product']);
             $order->setAttribute('orderNumber', $order->order_number);
+            $order->setAttribute('discountAmount', $discountAmount);
+            $order->setAttribute('couponCode', $coupon?->code);
+            $order->setAttribute('totalBeforeDiscount', round($grossAfter + $discountAmount, 2));
             return response()->json($order, 201);
         });
     }

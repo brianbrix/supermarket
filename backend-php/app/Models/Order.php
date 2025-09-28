@@ -25,7 +25,18 @@ class Order extends Model
     ];
 
     protected $fillable = [
-        'customer_name','customer_phone','status','total_gross','total_net','vat_amount','user_id','thumbnail_url','order_number'
+        'customer_name',
+        'customer_phone',
+        'status',
+        'total_gross',
+        'discount_amount',
+        'total_net',
+        'vat_amount',
+        'user_id',
+        'coupon_id',
+        'coupon_code',
+        'thumbnail_url',
+        'order_number'
     ];
 
     protected $appends = ['payment_status','payment_method'];
@@ -58,6 +69,11 @@ class Order extends Model
 
     public function latestPayment() {
         return $this->hasOne(Payment::class)->latestOfMany();
+    }
+
+    public function coupon()
+    {
+        return $this->belongsTo(Coupon::class);
     }
 
     protected function paymentStatus(): Attribute

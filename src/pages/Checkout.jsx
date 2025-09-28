@@ -14,6 +14,7 @@ import { paymentBranding, api } from '../services/api.js';
 import { BRAND_COPY_FOOTER, BRAND_RECEIPT_TITLE } from '../config/brand.js';
 import { useAuth } from '../context/AuthContext.jsx';
 import { appendGuestOrder, ensureGuestSessionId } from '../utils/guestOrders.js';
+import CouponBox from '../components/CouponBox.jsx';
 
 let pdfMakePromise;
 
@@ -41,10 +42,33 @@ function buildCartSignature(list) {
     .join('|');
 }
 
+function prorateTotals(grossBefore, discount, vatRate) {
+  const safeGross = Number.isFinite(Number(grossBefore)) ? Number(grossBefore) : 0;
+  const safeDiscount = Number.isFinite(Number(discount)) ? Number(discount) : 0;
+  const grossClamped = Math.max(0, Math.round(safeGross * 100) / 100);
+  const discountClamped = Math.min(Math.max(Math.round(safeDiscount * 100) / 100, 0), grossClamped);
+  const ratio = grossClamped > 0 ? discountClamped / grossClamped : 0;
+  const vatBefore = Math.round((grossClamped - grossClamped / (1 + vatRate)) * 100) / 100;
+  const netBefore = Math.round((grossClamped - vatBefore) * 100) / 100;
+  const netAfter = Math.round(Math.max(netBefore - netBefore * ratio, 0) * 100) / 100;
+  const vatAfter = Math.round(Math.max(vatBefore - vatBefore * ratio, 0) * 100) / 100;
+  const grossAfter = Math.round(Math.max(grossClamped - discountClamped, 0) * 100) / 100;
+  return {
+    grossBefore: grossClamped,
+    grossAfter,
+    discount: discountClamped,
+    ratio,
+    netBefore,
+    netAfter,
+    vatBefore,
+    vatAfter
+  };
+}
+
 export default function Checkout() {
   const { user: authUser, isAuthenticated, preferences } = useAuth();
   const guestSessionId = ensureGuestSessionId();
-  const { items, total, clearCart, backupCart, restoreCart, clearCartBackup, hasCartBackup } = useCart();
+  const { items, subtotal, total, discount: cartDiscount, coupon, clearCart, backupCart, restoreCart, clearCartBackup, hasCartBackup } = useCart();
   const VAT_RATE = 0.16; // 16% VAT (prices assumed VAT-inclusive)
   const { push } = useToast();
   const navigate = useNavigate();
@@ -129,9 +153,22 @@ export default function Checkout() {
     if (effectivePaymentStatus === 'FAILED') return 'failed';
     return 'pending';
   })();
-  const liveCartTotal = Number.isFinite(Number(total)) ? Number(total) : 0;
+  const grossBeforeDiscount = Number.isFinite(Number(subtotal)) ? Number(subtotal) : 0;
+  const liveDiscount = Number.isFinite(Number(cartDiscount)) ? Number(cartDiscount) : 0;
+  const breakdown = prorateTotals(grossBeforeDiscount, liveDiscount, VAT_RATE);
+  const liveCartTotal = breakdown.grossAfter;
+  const liveCartNetTotal = breakdown.netAfter;
+  const liveCartVatTotal = breakdown.vatAfter;
   const snapshotTotal = Number.isFinite(Number(orderSnapshot?.total)) ? Number(orderSnapshot.total) : liveCartTotal;
   const formattedSnapshotTotal = snapshotTotal.toFixed(2);
+  const snapshotDiscount = Number.isFinite(Number(orderSnapshot?.discount ?? orderSnapshot?.discountAmount))
+    ? Number(orderSnapshot?.discount ?? orderSnapshot?.discountAmount)
+    : null;
+  const displayDiscount = snapshotDiscount != null ? snapshotDiscount : liveDiscount;
+  const displaySubtotal = Number.isFinite(Number(orderSnapshot?.totalBeforeDiscount))
+    ? Number(orderSnapshot.totalBeforeDiscount)
+    : grossBeforeDiscount;
+  const displayTotal = snapshotTotal;
 
   const PAYMENT_LABELS = {
     'mobile-money': 'Mobile Money',
@@ -370,7 +407,8 @@ export default function Checkout() {
       const created = await api.orders.create({
         customerName: form.name,
         customerPhone: form.phone,
-        items: items.map(i => ({ productId: i.id, quantity: i.qty }))
+        items: items.map(i => ({ productId: i.id, quantity: i.qty })),
+        couponCode: coupon?.code || undefined
       });
       const backendOrderNumber = created?.orderNumber ?? created?.order_number ?? null;
       // Create a snapshot of the current cart for display and receipts before clearing
@@ -378,11 +416,15 @@ export default function Checkout() {
       const backendSubtotal = parseMoney(created?.totalNet ?? created?.subtotal ?? created?.netTotal);
       const backendVat = parseMoney(created?.vatAmount ?? created?.vat ?? created?.taxAmount);
       const backendTotal = parseMoney(created?.totalGross ?? created?.total ?? created?.totalAmount);
+      const backendDiscount = parseMoney(created?.discountAmount ?? created?.discount_amount);
+      const backendTotalBefore = parseMoney(
+        created?.totalBeforeDiscount ?? created?.total_before_discount ?? (
+          backendDiscount != null && backendTotal != null ? backendTotal + backendDiscount : null
+        )
+      );
 
-      const computedVat = roundCurrency(liveCartTotal - (liveCartTotal / (1 + VAT_RATE)));
-      const fallbackVat = computedVat ?? 0;
-      const computedNet = roundCurrency(liveCartTotal - fallbackVat);
-      const fallbackNet = computedNet ?? liveCartTotal;
+    const fallbackVat = roundCurrency(liveCartVatTotal) ?? 0;
+    const fallbackNet = roundCurrency(liveCartNetTotal) ?? liveCartNetTotal ?? liveCartTotal;
 
       const snapshotItems = Array.isArray(created?.items) && created.items.length > 0
         ? created.items.map((item, idx) => {
@@ -408,12 +450,16 @@ export default function Checkout() {
       const resolvedSubtotal = roundCurrency(backendSubtotal ?? fallbackNet) ?? fallbackNet;
       const resolvedVat = roundCurrency(backendVat ?? fallbackVat) ?? fallbackVat;
       const resolvedTotal = roundCurrency(backendTotal ?? liveCartTotal) ?? liveCartTotal;
+      const resolvedDiscount = roundCurrency(backendDiscount ?? liveDiscount) ?? liveDiscount;
+      const resolvedTotalBefore = roundCurrency(backendTotalBefore ?? grossBeforeDiscount) ?? grossBeforeDiscount;
       const snapshotUserId = created?.user?.id ?? created?.user_id ?? (authUser?.id ?? null);
       const snapshot = {
         items: snapshotItems,
         subtotal: resolvedSubtotal,
         vat: resolvedVat,
         total: resolvedTotal,
+        discount: resolvedDiscount,
+        totalBeforeDiscount: resolvedTotalBefore,
         ts: Date.now(),
         backendOrderId: created.id,
         orderNumber: backendOrderNumber ?? orderRef,
@@ -421,7 +467,8 @@ export default function Checkout() {
         cartSignature: cartSig,
         userId: snapshotUserId,
         paymentStatus: created?.latestPayment?.status ?? created?.paymentStatus ?? null,
-        paymentMethod: created?.latestPayment?.method ?? created?.paymentMethod ?? null
+        paymentMethod: created?.latestPayment?.method ?? created?.paymentMethod ?? null,
+        couponCode: created?.couponCode ?? created?.coupon_code ?? coupon?.code ?? null
       };
       setOrderSnapshot(snapshot);
       persist({ orderSnapshot: snapshot });
@@ -462,10 +509,11 @@ export default function Checkout() {
       let snapshot = orderSnapshot;
       const paymentAmount = parseMoney(mm.payment?.amount);
       if (!snapshot) {
-        const baseTotal = paymentAmount ?? liveCartTotal;
-        const normalizedTotal = roundCurrency(baseTotal) ?? baseTotal;
-        const vatPortion = roundCurrency(normalizedTotal - (normalizedTotal / (1 + VAT_RATE))) ?? 0;
-        const net = roundCurrency(normalizedTotal - vatPortion) ?? normalizedTotal;
+        const normalizedTotal = roundCurrency(paymentAmount ?? liveCartTotal) ?? liveCartTotal;
+        const vatPortion = roundCurrency(breakdown.vatAfter) ?? breakdown.vatAfter;
+        const net = roundCurrency(breakdown.netAfter) ?? breakdown.netAfter ?? normalizedTotal;
+        const totalBeforeDiscount = roundCurrency(breakdown.grossBefore) ?? breakdown.grossBefore;
+        const discountAmount = roundCurrency(breakdown.discount) ?? breakdown.discount;
         snapshot = {
           items: items.map(i => {
             const qty = Number.isFinite(Number(i.qty)) ? Number(i.qty) : 0;
@@ -475,11 +523,14 @@ export default function Checkout() {
           subtotal: net,
           vat: vatPortion,
           total: normalizedTotal,
+          totalBeforeDiscount,
+          discount: discountAmount,
           ts: Date.now(),
           cartSignature: buildCartSignature(items),
           userId: authUser?.id ?? null,
           paymentStatus: mm.payment?.status ?? 'SUCCESS',
           paymentMethod: mm.payment?.method ?? null,
+          couponCode: coupon?.code ?? null,
           orderNumber: displayOrderRef,
           orderRef: displayOrderRef
         };
@@ -488,11 +539,17 @@ export default function Checkout() {
         const normalizedTotal = roundCurrency(paymentAmount ?? snapshot.total ?? liveCartTotal) ?? snapshot.total ?? liveCartTotal;
         const normalizedSubtotal = snapshot.subtotal != null ? roundCurrency(snapshot.subtotal) ?? snapshot.subtotal : snapshot.subtotal;
         const normalizedVat = snapshot.vat != null ? roundCurrency(snapshot.vat) ?? snapshot.vat : snapshot.vat;
+        const normalizedDiscount = snapshot.discount != null ? roundCurrency(snapshot.discount) ?? snapshot.discount : roundCurrency(breakdown.discount) ?? snapshot.discount;
+        const normalizedTotalBefore = snapshot.totalBeforeDiscount != null
+          ? roundCurrency(snapshot.totalBeforeDiscount) ?? snapshot.totalBeforeDiscount
+          : roundCurrency(breakdown.grossBefore) ?? breakdown.grossBefore;
         snapshot = {
           ...snapshot,
           total: normalizedTotal,
           subtotal: normalizedSubtotal ?? snapshot.subtotal,
           vat: normalizedVat ?? snapshot.vat,
+          discount: normalizedDiscount ?? snapshot.discount ?? 0,
+          totalBeforeDiscount: normalizedTotalBefore ?? snapshot.totalBeforeDiscount ?? normalizedTotal,
           paymentStatus: mm.payment?.status ?? snapshot.paymentStatus ?? 'SUCCESS',
           paymentMethod: mm.payment?.method ?? snapshot.paymentMethod ?? null
         };
@@ -562,6 +619,9 @@ export default function Checkout() {
           totalGross: snapshot.total,
           totalNet: snapshot.subtotal ?? roundCurrency(snapshot.total / (1 + VAT_RATE)) ?? snapshot.total,
           vatAmount: snapshot.vat ?? roundCurrency(snapshot.total - (snapshot.subtotal ?? (snapshot.total / (1 + VAT_RATE)))) ?? 0,
+          totalBeforeDiscount: snapshot.totalBeforeDiscount ?? (snapshot.total + (snapshot.discount ?? 0)),
+          discountAmount: snapshot.discount ?? 0,
+          couponCode: snapshot.couponCode ?? coupon?.code ?? null,
           paymentStatus: snapshot.paymentStatus ?? 'SUCCESS',
           paymentMethod: fallbackMethodCode,
           paymentProgress: snapshot.paymentStatus ? {
@@ -889,9 +949,11 @@ export default function Checkout() {
         qty
       };
     });
-    const gross = roundCurrency(liveCartTotal) ?? liveCartTotal;
-    const vatPortion = roundCurrency(gross - (gross / (1 + VAT_RATE))) ?? 0;
-    const net = roundCurrency(gross - vatPortion) ?? gross;
+  const gross = roundCurrency(liveCartTotal) ?? liveCartTotal;
+  const totalBefore = roundCurrency(breakdown.grossBefore) ?? breakdown.grossBefore;
+  const discountAmount = roundCurrency(breakdown.discount) ?? breakdown.discount;
+  const vatPortion = roundCurrency(liveCartVatTotal) ?? liveCartVatTotal ?? 0;
+  const net = roundCurrency(liveCartNetTotal) ?? liveCartNetTotal ?? gross;
 
     setCashSubmitting(true);
     let createdOrder = null;
@@ -946,9 +1008,11 @@ export default function Checkout() {
           })
         : cartItems;
 
-      const resolvedSubtotal = roundCurrency(backendSubtotal ?? net) ?? net;
-      const resolvedVat = roundCurrency(backendVat ?? vatPortion) ?? vatPortion;
-      const resolvedTotal = roundCurrency(backendTotal ?? gross) ?? gross;
+  const resolvedSubtotal = roundCurrency(backendSubtotal ?? net) ?? net;
+  const resolvedVat = roundCurrency(backendVat ?? vatPortion) ?? vatPortion;
+  const resolvedTotal = roundCurrency(backendTotal ?? gross) ?? gross;
+  const resolvedDiscount = roundCurrency(parseMoney(createdOrder?.discountAmount ?? createdOrder?.discount_amount) ?? discountAmount) ?? discountAmount;
+  const resolvedTotalBefore = roundCurrency(parseMoney(createdOrder?.totalBeforeDiscount ?? createdOrder?.total_before_discount) ?? totalBefore) ?? totalBefore;
       const snapshotUserId = createdOrder?.user?.id ?? createdOrder?.user_id ?? (authUser?.id ?? null);
 
       const snapshot = {
@@ -956,6 +1020,8 @@ export default function Checkout() {
         subtotal: resolvedSubtotal,
         vat: resolvedVat,
         total: resolvedTotal,
+        totalBeforeDiscount: resolvedTotalBefore,
+        discount: resolvedDiscount,
         ts: now,
         backendOrderId,
         cartSignature: cartSignatureBefore,
@@ -963,6 +1029,7 @@ export default function Checkout() {
         paymentStatus,
         paymentMethod: paymentMethodCode,
         paymentProgress,
+        couponCode: createdOrder?.couponCode ?? createdOrder?.coupon_code ?? coupon?.code ?? null,
       };
 
       setOrderSnapshot(snapshot);
@@ -1001,6 +1068,9 @@ export default function Checkout() {
           totalGross: resolvedTotal,
           totalNet: resolvedSubtotal,
           vatAmount: resolvedVat,
+          totalBeforeDiscount: resolvedTotalBefore,
+          discountAmount: resolvedDiscount,
+          couponCode: snapshot.couponCode ?? coupon?.code ?? null,
           paymentStatus,
           paymentMethod: paymentMethodCode,
           paymentProgress,
@@ -1309,20 +1379,44 @@ export default function Checkout() {
         <div className="col-12 col-lg-5">
           <div className="border rounded p-3 bg-body">
             <h2 className="h6">Summary</h2>
+            {!submitted && step !== 3 && (
+              <CouponBox customerPhone={form.phone} className="mb-3" compact />
+            )}
             {(() => {
-              const snap = (orderSnapshot && Array.isArray(orderSnapshot.items)) ? orderSnapshot : { items, total };
+              const snap = (orderSnapshot && Array.isArray(orderSnapshot.items)) ? orderSnapshot : { items, total: liveCartTotal };
               return (
                 <ul className="list-unstyled small mb-2">
-                  {(Array.isArray(snap.items) ? snap.items : items).map(i => (
-                <li key={i.id} className="d-flex justify-content-between border-bottom py-1">
-                  <span>{i.name} × {i.qty}</span>
-                  <span>{formatKES(i.price * i.qty)}</span>
-                </li>
-                  ))}
+                  {(Array.isArray(snap.items) ? snap.items : items).map(i => {
+                    const qty = Number.isFinite(Number(i.qty)) ? Number(i.qty) : 0;
+                    const price = Number.isFinite(Number(i.price)) ? Number(i.price) : Number(i.unitPriceGross ?? i.unitPrice ?? 0);
+                    const label = i.name ?? i.productName ?? `Item ${i.id ?? ''}`;
+                    return (
+                      <li key={i.id ?? `${label}-${qty}`} className="d-flex justify-content-between border-bottom py-1">
+                        <span>{label} × {qty}</span>
+                        <span>{formatKES(price * qty)}</span>
+                      </li>
+                    );
+                  })}
                 </ul>
               );
             })()}
-            <p className="fw-semibold mb-0">Total: {formatKES((orderSnapshot?.total) ?? total)}</p>
+            <div className="mt-3 small">
+              <div className="d-flex justify-content-between">
+                <span>Subtotal</span>
+                <span>{formatKES(displaySubtotal)}</span>
+              </div>
+              {displayDiscount > 0 && (
+                <div className="d-flex justify-content-between text-success fw-semibold mt-1">
+                  <span>Coupon savings</span>
+                  <span>-{formatKES(displayDiscount)}</span>
+                </div>
+              )}
+              <div className="d-flex justify-content-between fw-semibold mt-2">
+                <span>Total due</span>
+                <span>{formatKES(displayTotal)}</span>
+              </div>
+              <p className="text-muted small mb-0 mt-1">Taxes included where applicable.</p>
+            </div>
           </div>
         </div>
       </div>

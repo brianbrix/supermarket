@@ -18,6 +18,8 @@ use App\Http\Controllers\Admin\AnalyticsExtraController;
 use App\Http\Controllers\Admin\UserAdminController;
 use App\Http\Controllers\Auth\AuthController;
 use App\Http\Controllers\API\SystemSettingController as PublicSystemSettingController;
+use App\Http\Controllers\API\CouponController;
+use App\Http\Controllers\Admin\CouponAdminController;
 use App\Http\Controllers\API\UserPreferenceController;
 
 Route::get('/products', [ProductController::class, 'index']);
@@ -41,6 +43,7 @@ Route::get('/payments/order/{orderId}', [PaymentController::class, 'getByOrder']
 Route::post('/payments/order/{orderId}/fail', [PaymentController::class, 'failByOrder']);
 Route::get('/payments/options', [PaymentOptionPublicController::class, 'index']);
 Route::get('/settings', [PublicSystemSettingController::class, 'index']);
+Route::post('/coupons/preview', [CouponController::class, 'preview']);
 // Callback webhooks (no auth)
 Route::post('/payments/mpesa/callback', [PaymentController::class, 'mpesaCallback']);
 Route::post('/payments/airtel/callback', [PaymentController::class, 'airtelCallback']);
@@ -76,6 +79,12 @@ Route::middleware(['auth:sanctum','role:ADMIN'])->prefix('admin')->group(functio
     Route::get('/analytics/aov', [AnalyticsExtraController::class, 'aov']);
     Route::get('/analytics/unified', [AnalyticsExtraController::class, 'unified']);
     Route::get('/analytics/advanced', [AnalyticsExtraController::class, 'advanced']);
+    Route::get('/coupons', [CouponAdminController::class, 'index']);
+    Route::post('/coupons', [CouponAdminController::class, 'store']);
+    Route::put('/coupons/{coupon}', [CouponAdminController::class, 'update']);
+    Route::delete('/coupons/{coupon}', [CouponAdminController::class, 'destroy']);
+    Route::post('/coupons/{coupon}/activate', [CouponAdminController::class, 'activate']);
+    Route::post('/coupons/{coupon}/deactivate', [CouponAdminController::class, 'deactivate']);
     Route::get('/users', [UserAdminController::class, 'index']);
     Route::post('/users/{user}/activate', [UserAdminController::class, 'activate']);
     Route::post('/users/{user}/deactivate', [UserAdminController::class, 'deactivate']);

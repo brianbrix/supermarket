@@ -115,6 +115,7 @@ Common optimization-friendly commands:
 - `docker compose up --build` – container images build cleanly and services start
 
 ## 📓 Release notes
+- Introduced a full admin coupon management console (list/search, create/edit, activate/deactivate) powered by the new `/admin/coupons` API endpoints.
 - Lazily load pdfmake in `Checkout.jsx` via dynamic `import()` (see `getPdfMake()` helper) to defer the 2 MB dependency until a receipt is exported.
 - Big query caching landed in `backend-php/app/Http/Controllers/API/ProductController.php` using `Cache::remember()` with Redis keys tied to product update timestamps.
 - Vite config now emits smaller vendor bundles (`vendor-react`, `vendor-router`, etc.) using a per-package `manualChunks` splitter.

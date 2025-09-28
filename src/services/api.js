@@ -137,6 +137,12 @@ export const api = {
     list: () => request('/orders'),
     get: (id) => request(`/orders/${id}`)
   },
+  coupons: {
+    preview: ({ code, cartTotal, customerPhone } = {}) => request('/coupons/preview', {
+      method: 'POST',
+      body: JSON.stringify({ code, cartTotal, customerPhone })
+    })
+  },
   user: {
     orders: (page=0,size=10) => request(`/user/orders?page=${page}&size=${size}`),
     preferences: {
@@ -274,6 +280,32 @@ export const api = {
         update: (id,payload) => request(`/admin/payment-options/${id}`, { method:'PUT', body: JSON.stringify(payload)}),
         delete: (id) => request(`/admin/payment-options/${id}`, { method:'DELETE' })
       }
+    },
+    coupons: {
+      list: ({ page = 0, size = 20, search, status, active, startsFrom, endsTo, sort, direction } = {}) => {
+        const params = new URLSearchParams();
+        params.set('page', page);
+        params.set('size', size);
+        if (search) params.set('q', search);
+        if (active !== undefined && active !== null && active !== '') {
+          params.set('active', String(active));
+        } else if (status) {
+          const normalized = String(status).toLowerCase();
+          if (normalized === 'active') params.set('active', 'true');
+          else if (normalized === 'inactive') params.set('active', 'false');
+          else params.set('status', status);
+        }
+        if (startsFrom) params.set('startsFrom', startsFrom);
+        if (endsTo) params.set('endsTo', endsTo);
+        if (sort) params.set('sort', sort);
+        if (direction) params.set('direction', direction);
+        return request(`/admin/coupons?${params.toString()}`);
+      },
+      create: (payload) => request('/admin/coupons', { method: 'POST', body: JSON.stringify(payload) }),
+      update: (id, payload) => request(`/admin/coupons/${id}`, { method: 'PUT', body: JSON.stringify(payload) }),
+      delete: (id) => request(`/admin/coupons/${id}`, { method: 'DELETE' }),
+      activate: (id) => request(`/admin/coupons/${id}/activate`, { method: 'POST' }),
+      deactivate: (id) => request(`/admin/coupons/${id}/deactivate`, { method: 'POST' })
     },
     systemSettings: {
       list: () => request('/admin/system-settings'),
