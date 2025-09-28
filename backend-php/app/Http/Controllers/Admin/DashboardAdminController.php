@@ -20,7 +20,7 @@ class DashboardAdminController extends Controller
         $cancelledOrders = Order::where('status','CANCELLED')->count();
         $deliveredOrders = Order::where('status','DELIVERED')->count();
         $refundedOrders = Order::where('status','REFUNDED')->count();
-    $failedOrders = Order::where('status','FAILED')->count();
+        $failedOrders = Order::where('status','FAILED')->count();
 
         // Frontend originally had SHIPPED; return zero for compatibility
         $shippedOrders = Order::where('status','SHIPPED')->count(); // will be 0 unless status added later

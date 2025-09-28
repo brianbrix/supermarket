@@ -79,6 +79,48 @@ class ProductController extends Controller
         return new ProductResource($product);
     }
 
+    public function related(Request $request, Product $product)
+    {
+        $limit = (int) $request->get('limit', 6);
+        if ($limit < 1) {
+            $limit = 1;
+        } elseif ($limit > 12) {
+            $limit = 12;
+        }
+
+        $categoryWeight = 0.6;
+        $priceWeight = 0.35;
+        $stockWeight = 0.05;
+
+        $anchorPrice = max((float) $product->price, 1.0);
+        $categoryId = $product->category_id ?? 0;
+
+        $related = Product::query()
+            ->select('products.*')
+            ->where('products.id', '!=', $product->id)
+            ->with(['category', 'images'])
+            ->selectRaw(
+                '(CASE WHEN products.category_id = ? THEN ? ELSE 0 END)'
+                . ' + (1 - LEAST(ABS(products.price - ?) / ?, 1)) * ?'
+                . ' + (CASE WHEN products.stock > 0 THEN ? ELSE 0 END) AS relevance_score',
+                [
+                    $categoryId,
+                    $categoryWeight,
+                    (float) $product->price,
+                    $anchorPrice,
+                    $priceWeight,
+                    $stockWeight,
+                ]
+            )
+            ->orderByDesc('relevance_score')
+            ->orderByDesc('products.stock')
+            ->orderBy('products.price')
+            ->limit($limit)
+            ->get();
+
+        return ProductResource::collection($related);
+    }
+
     private function pageResponse($paginator, $data)
     {
         return response()->json([

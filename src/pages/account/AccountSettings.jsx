@@ -41,11 +41,18 @@ export default function AccountSettings() {
     }));
   }, [preferences]);
 
+  useEffect(() => {
+    setForm(prev => (prev.themePreference === theme ? prev : { ...prev, themePreference: theme }));
+  }, [theme]);
+
   const isBusy = useMemo(() => saving || preferencesLoading, [saving, preferencesLoading]);
 
   function handleChange(e) {
     const { name, type, checked, value } = e.target;
     setForm(prev => ({ ...prev, [name]: type === 'checkbox' ? checked : value }));
+    if (name === 'themePreference') {
+      setTheme(value, 'user');
+    }
   }
 
   function handleAddressFieldChange(index, field, value) {

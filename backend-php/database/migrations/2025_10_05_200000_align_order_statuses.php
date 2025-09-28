@@ -6,13 +6,13 @@ use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Schema;
 
 return new class extends Migration {
+    private const STATUSES = "'PENDING','PROCESSING','SHIPPED','DELIVERED','CANCELLED','REFUNDED','FAILED','COMPLETED'";
+
     public function up(): void
     {
         $driver = Schema::getConnection()->getDriverName();
-        $statuses = "'PENDING','PROCESSING','SHIPPED','DELIVERED','CANCELLED','REFUNDED','FAILED','COMPLETED'";
-
         if ($driver === 'mysql') {
-            DB::statement("ALTER TABLE orders MODIFY status ENUM($statuses) DEFAULT 'PENDING'");
+            DB::statement("ALTER TABLE orders MODIFY status ENUM(" . self::STATUSES . ") DEFAULT 'PENDING'");
             return;
         }
 
@@ -29,12 +29,11 @@ return new class extends Migration {
             if ($constraint) {
                 $constraintName = $constraint->constraint_name;
                 DB::statement("ALTER TABLE orders DROP CONSTRAINT \"{$constraintName}\"");
-                DB::statement("ALTER TABLE orders ADD CONSTRAINT \"{$constraintName}\" CHECK (status IN ($statuses))");
+                DB::statement("ALTER TABLE orders ADD CONSTRAINT \"{$constraintName}\" CHECK (status IN (" . self::STATUSES . "))");
                 return;
             }
         }
 
-        // Fallback: attempt a generic change using string column
         Schema::table('orders', function (Blueprint $table) {
             $table->string('status', 32)->default('PENDING')->change();
         });
@@ -43,8 +42,10 @@ return new class extends Migration {
     public function down(): void
     {
         $driver = Schema::getConnection()->getDriverName();
+        $legacy = "'PENDING','PROCESSING','COMPLETED','CANCELLED','FAILED'";
+
         if ($driver === 'mysql') {
-            DB::statement("ALTER TABLE orders MODIFY status ENUM('PENDING','PROCESSING','COMPLETED','CANCELLED','FAILED') DEFAULT 'PENDING'");
+            DB::statement("ALTER TABLE orders MODIFY status ENUM($legacy) DEFAULT 'PENDING'");
             return;
         }
 
@@ -61,7 +62,7 @@ return new class extends Migration {
             if ($constraint) {
                 $constraintName = $constraint->constraint_name;
                 DB::statement("ALTER TABLE orders DROP CONSTRAINT \"{$constraintName}\"");
-                DB::statement("ALTER TABLE orders ADD CONSTRAINT \"{$constraintName}\" CHECK (status IN ('PENDING','PROCESSING','COMPLETED','CANCELLED','FAILED'))");
+                DB::statement("ALTER TABLE orders ADD CONSTRAINT \"{$constraintName}\" CHECK (status IN ($legacy))");
                 return;
             }
         }

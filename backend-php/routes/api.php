@@ -23,6 +23,7 @@ use App\Http\Controllers\API\UserPreferenceController;
 Route::get('/products', [ProductController::class, 'index']);
 Route::get('/products/price-range', [ProductController::class, 'priceRange']);
 Route::get('/products/search', [ProductController::class, 'search']);
+Route::get('/products/{product}/related', [ProductController::class, 'related'])->whereNumber('product');
 Route::get('/products/{product}', [ProductController::class, 'show'])->whereNumber('product');
 Route::get('/products/category/{category}', [ProductController::class, 'byCategory']);
 Route::get('/categories', [CategoryController::class, 'index']);

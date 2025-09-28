@@ -1,9 +1,11 @@
 import { useEffect, useState } from 'react';
 import { api } from '../../services/api.js';
 import OrderDetailModal from '../../components/admin/OrderDetailModal.jsx';
+import StatusBadge from '../../components/StatusBadge.jsx';
 import { mergeOrders, normalizeOrder } from '../../utils/order.js';
 import '../../styles/adminDashboard.scss';
 import { useCurrencyFormatter, useSettings } from '../../context/SettingsContext.jsx';
+import { ORDER_STATUSES } from '../../config/orderStatuses.js';
 
 // Simple palette mapping for order/stat semantics
 const STAT_STYLES = [
@@ -14,8 +16,6 @@ const STAT_STYLES = [
   { key:'shippedOrders', label:'Shipped', gradient:'linear-gradient(135deg,#10b981,#34d399)', icon:'bi-truck', text:'#fff' },
   { key:'cancelledOrders', label:'Cancelled', gradient:'linear-gradient(135deg,#ef4444,#f87171)', icon:'bi-x-octagon', text:'#fff' }
 ];
-
-const ORDER_STATUSES = ['PENDING','PROCESSING','SHIPPED','DELIVERED','CANCELLED','REFUNDED'];
 
 export default function AdminDashboard(){
   const [stats, setStats] = useState(null);
@@ -99,23 +99,25 @@ export default function AdminDashboard(){
                   </td>
                   <td className="text-truncate" style={{maxWidth:160}}>{o.customerName || '—'}</td>
                   <td style={{minWidth:'170px'}} className="d-flex align-items-center gap-2">
-                    <span className={`status-badge ${o.status}`}>{o.status}</span>
-                    <select
-                      className="form-select form-select-sm status-select flex-grow-1"
-                      value={o.status}
-                      onChange={async (e)=>{
-                        const newStatus = e.target.value;
-                        try {
-                          const updated = await api.admin.orders.updateStatus(o.id, newStatus);
-                          setRecent(prev => prev.map(r => r.id === o.id ? mergeOrders(r, updated) : r));
-                          if (selectedOrder?.id === o.id) {
-                            setSelectedOrder(prev => mergeOrders(prev, updated));
-                          }
-                        } catch (err) { setError(err.message); }
-                      }}
-                    >
-                      {ORDER_STATUSES.map(s => <option key={s} value={s}>{s}</option>)}
-                    </select>
+                    <StatusBadge status={o.status} />
+                    <div className={`flex-grow-1 status-select ${o.status?.toLowerCase()}`}>
+                      <select
+                        className="form-select form-select-sm"
+                        value={o.status}
+                        onChange={async (e)=>{
+                          const newStatus = e.target.value;
+                          try {
+                            const updated = await api.admin.orders.updateStatus(o.id, newStatus);
+                            setRecent(prev => prev.map(r => r.id === o.id ? mergeOrders(r, updated) : r));
+                            if (selectedOrder?.id === o.id) {
+                              setSelectedOrder(prev => mergeOrders(prev, updated));
+                            }
+                          } catch (err) { setError(err.message); }
+                        }}
+                      >
+                        {ORDER_STATUSES.map(s => <option key={s} value={s}>{s}</option>)}
+                      </select>
+                    </div>
                   </td>
                   <td className="text-end fw-semibold">{formatAmount(o.totalGross ?? o.total ?? 0)}</td>
                   <td className="text-center">{o.items?.length ?? o.itemsCount ?? 0}</td>

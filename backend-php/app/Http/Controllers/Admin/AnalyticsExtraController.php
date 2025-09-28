@@ -47,7 +47,7 @@ class AnalyticsExtraController extends Controller
         $includeRefunded = filter_var($request->query('includeRefunded'), FILTER_VALIDATE_BOOLEAN);
         $includeCancelled = filter_var($request->query('includeCancelled'), FILTER_VALIDATE_BOOLEAN);
 
-        $allowedStatuses = ['PENDING','PROCESSING','SHIPPED','DELIVERED','CANCELLED','REFUNDED','FAILED','COMPLETED'];
+        $allowedStatuses = Order::STATUSES;
         $aliasMap = [
             'DELIVERED' => ['DELIVERED','COMPLETED'],
             'COMPLETED' => ['COMPLETED','DELIVERED'],
@@ -205,7 +205,7 @@ class AnalyticsExtraController extends Controller
         $churnRatePct = $previousWindowCustomers>0 ? ($churnedCustomers/$previousWindowCustomers)*100 : 0;
 
         // Funnel counts (current window)
-    $statusCounts = ['PENDING'=>0,'PROCESSING'=>0,'SHIPPED'=>0,'DELIVERED'=>0,'CANCELLED'=>0,'REFUNDED'=>0,'FAILED'=>0];
+        $statusCounts = ['PENDING'=>0,'PROCESSING'=>0,'SHIPPED'=>0,'DELIVERED'=>0,'CANCELLED'=>0,'REFUNDED'=>0,'FAILED'=>0,'COMPLETED'=>0];
         foreach ($currentOrders as $o) {
             $st = strtoupper($o->status ?? '');
             if (isset($statusCounts[$st])) { $statusCounts[$st]++; }
@@ -214,8 +214,9 @@ class AnalyticsExtraController extends Controller
         $processing = $statusCounts['PROCESSING'];
         $shipped = $statusCounts['SHIPPED'];
         $delivered = $statusCounts['DELIVERED'];
-    $cancelled = $statusCounts['CANCELLED'];
-    $failed = $statusCounts['FAILED'];
+        $completed = $statusCounts['COMPLETED'];
+        $cancelled = $statusCounts['CANCELLED'];
+        $failed = $statusCounts['FAILED'];
         $refunded = $statusCounts['REFUNDED'];
 
         $pct = function($num,$den){ return $den>0 ? round(($num/$den)*100,2) : 0.0; };
@@ -223,7 +224,7 @@ class AnalyticsExtraController extends Controller
         $convProcessingToShipped = $pct($shipped, $processing);
         $convShippedToDelivered = $pct($delivered, $shipped);
         $overallConversionToDelivered = $pct($delivered, $pending); // simple baseline
-    $cancellationRatePct = $pct($cancelled + $failed, max(1,$pending));
+        $cancellationRatePct = $pct($cancelled + $failed, max(1,$pending));
         $refundRatePct = $pct($refunded, max(1,$pending));
 
         return response()->json([
@@ -250,6 +251,7 @@ class AnalyticsExtraController extends Controller
                 'processing' => $processing,
                 'shipped' => $shipped,
                 'delivered' => $delivered,
+                'completed' => $completed,
                 'cancelled' => $cancelled,
                 'failed' => $failed,
                 'refunded' => $refunded,

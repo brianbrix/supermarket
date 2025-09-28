@@ -13,6 +13,17 @@ class Order extends Model
 {
     use HasApiTokens, HasFactory;
 
+    public const STATUSES = [
+        'PENDING',
+        'PROCESSING',
+        'SHIPPED',
+        'DELIVERED',
+        'CANCELLED',
+        'REFUNDED',
+        'FAILED',
+        'COMPLETED',
+    ];
+
     protected $fillable = [
         'customer_name','customer_phone','status','total_gross','total_net','vat_amount','user_id','thumbnail_url','order_number'
     ];

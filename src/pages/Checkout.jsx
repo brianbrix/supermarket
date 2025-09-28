@@ -72,6 +72,7 @@ export default function Checkout() {
   const form = watch();
   const [submitted, setSubmitted] = useState(persisted.submitted || false);
   const [orderSnapshot, setOrderSnapshot] = useState(() => persisted.orderSnapshot || null);
+  const orderRef = useState(() => persisted.orderRef || generateOrderRef())[0];
   const displayOrderRef = orderSnapshot?.orderNumber ?? orderSnapshot?.orderRef ?? orderRef;
   const fileSafeOrderRef = (displayOrderRef || orderRef || 'order').toString().replace(/[^A-Za-z0-9_-]+/g, '-');
   const [step, setStep] = useState(persisted.step || 1); // 1: details, 2: payment, 3: confirm
@@ -80,7 +81,6 @@ export default function Checkout() {
   const [paymentRef, setPaymentRef] = useState('');
   const [cashSubmitting, setCashSubmitting] = useState(false);
   const mm = useMobileMoneyPayment();
-  const orderRef = useState(() => persisted.orderRef || generateOrderRef())[0];
   const [selectedAddressId, setSelectedAddressId] = useState(persisted.selectedAddressId || null);
   const savedAddresses = Array.isArray(preferences?.addresses) ? preferences.addresses : [];
 

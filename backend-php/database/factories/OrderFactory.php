@@ -14,7 +14,7 @@ class OrderFactory extends Factory
         return [
             'customer_name' => $this->faker->name(),
             'customer_phone' => $this->faker->phoneNumber(),
-            'status' => $this->faker->randomElement(['PENDING','PROCESSING','COMPLETED']),
+            'status' => $this->faker->randomElement(Order::STATUSES),
             'total_gross' => 0,
             'total_net' => 0,
             'vat_amount' => 0,

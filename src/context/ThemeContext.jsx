@@ -2,7 +2,7 @@ import { createContext, useContext, useEffect, useState } from 'react';
 
 const ThemeContext = createContext();
 
-const SOURCE_PRIORITY = { nav: 3, user: 2, admin: 1, system: 0 };
+const SOURCE_PRIORITY = { nav: 3, user: 3, admin: 2, system: 1 };
 
 function normalizeTheme(value) {
   return value === 'dark' ? 'dark' : 'light';

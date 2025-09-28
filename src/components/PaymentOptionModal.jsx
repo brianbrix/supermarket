@@ -48,11 +48,21 @@ export function PaymentOptionModal({ option, open, onClose, onInitiate, onReconc
     if (paymentHookStatus === 'pending') return 'Waiting for confirmation. Check your phone to approve the request.';
     if (paymentHookStatus === 'reconciling') return 'Confirming payment…';
     if (paymentHookStatus === 'timeout') return 'Payment timed out. You can try reconciling or restart the checkout.';
-    if (paymentHookStatus === 'failed') return 'Payment failed. Please create a new order to try again.';
+    if (paymentHookStatus === 'failed') return 'Payment failed. If money was deducted from your account, please confirm manually below. If not, create a new order to try again.';
     if (paymentHookStatus === 'succeeded') return 'Payment confirmed!';
     if (paymentHookStatus === 'error') return 'Could not initiate payment. Please check details and try again.';
     return null;
   })();
+  const failedNotification = paymentStatus === 'FAILED' || paymentHookStatus === 'failed' || paymentHookStatus === 'error';
+  const alertVariant = inProgress
+    ? 'alert-warning'
+    : failedNotification
+      ? 'alert-danger'
+      : paymentHookStatus === 'succeeded'
+        ? 'alert-success'
+        : paymentHookStatus === 'timeout'
+          ? 'alert-warning'
+          : 'alert-info';
 
   const handleCancel = (event) => {
     if (inProgress) {
@@ -103,7 +113,7 @@ export function PaymentOptionModal({ option, open, onClose, onInitiate, onReconc
         </div>
         <div className="p-3 pom-body">
           {statusMessage && (
-            <div className={`alert ${inProgress ? 'alert-warning' : paymentHookStatus === 'succeeded' ? 'alert-success' : 'alert-info'} py-2 small`}> 
+            <div className={`alert ${alertVariant} py-2 small`}>
               <div className="d-flex align-items-start gap-2">
                 {inProgress && <span className="spinner-border spinner-border-sm text-warning"></span>}
                 <div>

@@ -7,8 +7,7 @@ import StatusBadge from '../../components/StatusBadge.jsx';
 import { mergeOrders, normalizeOrder } from '../../utils/order.js';
 import '../../App.admin.css';
 import { useCurrencyFormatter, useSettings } from '../../context/SettingsContext.jsx';
-
-const STATUSES = ['PENDING','PROCESSING','SHIPPED','DELIVERED','CANCELLED','REFUNDED'];
+import { ORDER_STATUSES } from '../../config/orderStatuses.js';
 
 export default function AdminOrders() {
   const [orders, setOrders] = useState([]);
@@ -83,12 +82,29 @@ export default function AdminOrders() {
 
   async function changeStatus(id, status) {
     try {
-      const updated = await api.admin.orders.updateStatus(id, status);
-      setOrders(prev => prev.map(o => o.id === id ? mergeOrders(o, updated) : o));
+      setOrders(prev => prev.map(o => o.id === id ? { ...o, status } : o));
       if (selectedOrder?.id === id) {
-        setSelectedOrder(prev => mergeOrders(prev, updated));
+        setSelectedOrder(prev => prev ? { ...prev, status } : prev);
       }
-    } catch (e) { setError(e.message); }
+      const updated = await api.admin.orders.updateStatus(id, status);
+      const normalized = normalizeOrder(updated);
+      const finalStatus = normalized?.status ?? status;
+      setOrders(prev => prev.map(o => {
+        if (o.id !== id) return o;
+        const merged = mergeOrders(o, normalized ?? {});
+        return { ...merged, status: finalStatus };
+      }));
+      if (selectedOrder?.id === id) {
+        setSelectedOrder(prev => {
+          if (!prev) return prev;
+          const merged = mergeOrders(prev, normalized ?? {});
+          return { ...merged, status: finalStatus };
+        });
+      }
+    } catch (e) {
+      setError(e.message);
+      load(true);
+    }
   }
 
   return (
@@ -101,7 +117,7 @@ export default function AdminOrders() {
         <FilterBar.Field label="Status">
           <select className="form-select form-select-sm" value={draftFilters.status} onChange={e=>updateFilter('status', e.target.value)}>
             <option value="">All</option>
-            {STATUSES.map(s => <option key={s} value={s}>{s}</option>)}
+            {ORDER_STATUSES.map(s => <option key={s} value={s}>{s}</option>)}
           </select>
         </FilterBar.Field>
         <FilterBar.Field label="From">
@@ -158,7 +174,7 @@ export default function AdminOrders() {
                     <div className={`d-flex flex-column gap-1 status-select ${o.status?.toLowerCase()}`}> 
                       <StatusBadge status={o.status} />
                       <select className="form-select form-select-sm" value={o.status} onChange={e=>changeStatus(o.id, e.target.value)}>
-                        {STATUSES.map(s => <option key={s} value={s}>{s}</option>)}
+                        {ORDER_STATUSES.map(s => <option key={s} value={s}>{s}</option>)}
                       </select>
                     </div>
                   </td>

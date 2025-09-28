@@ -37,10 +37,12 @@ export default function Home() {
         setPageMeta(pageResp);
         const min = Number(range?.min ?? 0);
         const max = Number(range?.max ?? 0);
-        setSliderBounds({ min, max });
-        setPriceRange({ min, max });
-        initialSearchSkippedRef.current = true;
-        lastSearchKeyRef.current = JSON.stringify({ q: '', cat: 'all', min, max, stock: 0, page: 0 });
+  setSliderBounds({ min, max });
+  setPriceRange({ min, max });
+  const defaultNoPageKey = JSON.stringify({ q: '', cat: 'all', min, max, stock: 0 });
+  initialSearchSkippedRef.current = true;
+  lastFiltersNoPageRef.current = defaultNoPageKey;
+  lastSearchKeyRef.current = `${defaultNoPageKey}|page=0`;
         setBaselineLoaded(true);
         setLoading(false);
       })
@@ -64,11 +66,7 @@ export default function Home() {
         const min = Number(range?.min ?? 0);
         const max = Number(range?.max ?? 0);
         setSliderBounds({ min, max });
-        // If current priceRange is outside new bounds, clamp it but preserve user intent
-        setPriceRange(prev => ({
-          min: Math.max(min, Math.min(prev.min, max)),
-          max: Math.min(max, Math.max(prev.max, min))
-        }));
+        setPriceRange({ min, max });
       })
       .catch(() => {/* ignore bounds errors; keep previous bounds */});
     return () => { active = false; };
@@ -77,6 +75,7 @@ export default function Home() {
   // Prevent double fetch + flicker: run search only after initial baseline load AND when filters actually change.
   const initialSearchSkippedRef = useRef(false);
   const lastSearchKeyRef = useRef('');
+  const lastFiltersNoPageRef = useRef('');
   useEffect(() => {
     if (!baselineLoaded) return; // don't run until baseline data present
 
@@ -85,14 +84,20 @@ export default function Home() {
     const effectiveMin = rangeUninitialized ? sliderBounds.min : debouncedRange.min;
     const effectiveMax = rangeUninitialized ? sliderBounds.max : debouncedRange.max;
 
-    const filtersKey = JSON.stringify({
+    const filtersNoPageKey = JSON.stringify({
       q: debouncedQuery || '',
       cat: debouncedCategory,
       min: effectiveMin,
       max: effectiveMax,
-      stock: debouncedInStock ? 1 : 0,
-      page
+      stock: debouncedInStock ? 1 : 0
     });
+
+    if (page !== 0 && filtersNoPageKey !== lastFiltersNoPageRef.current) {
+      setPage(0);
+      return;
+    }
+
+    const filtersKey = `${filtersNoPageKey}|page=${page}`;
 
     if (filtersKey === lastSearchKeyRef.current) return; // no change
 
@@ -102,13 +107,18 @@ export default function Home() {
         effectiveMin === sliderBounds.min && effectiveMax === sliderBounds.max;
       if (noFiltersApplied) {
         initialSearchSkippedRef.current = true;
+        lastFiltersNoPageRef.current = filtersNoPageKey;
         lastSearchKeyRef.current = filtersKey;
         return;
       }
     }
 
+    lastFiltersNoPageRef.current = filtersNoPageKey;
     lastSearchKeyRef.current = filtersKey;
+    const requestKey = filtersKey;
+    let cancelled = false;
     setLoading(true);
+    setError(null);
     const payload = {
       page,
       size
@@ -124,12 +134,18 @@ export default function Home() {
 
     api.products.search(payload)
       .then(pageResp => {
+        if (cancelled || lastSearchKeyRef.current !== requestKey) return;
         const mapped = pageResp.content.map(mapProductResponse);
         setResults(mapped);
         setPageMeta(pageResp);
         setLoading(false);
       })
-      .catch(e => { setError(e.message); setLoading(false); });
+      .catch(e => {
+        if (cancelled || lastSearchKeyRef.current !== requestKey) return;
+        setError(e.message);
+        setLoading(false);
+      });
+    return () => { cancelled = true; };
   }, [debouncedQuery, debouncedCategory, debouncedRange.min, debouncedRange.max, debouncedInStock, page, baselineLoaded, size, sliderBounds.min, sliderBounds.max]);
 
   // Reset to first page whenever filters fundamentally change (excluding page itself)

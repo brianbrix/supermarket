@@ -11,7 +11,16 @@ return new class extends Migration {
             $table->id();
             $table->string('customer_name')->nullable();
             $table->string('customer_phone')->nullable();
-            $table->enum('status', ['PENDING','PROCESSING','COMPLETED','CANCELLED'])->default('PENDING');
+            $table->enum('status', [
+                'PENDING',
+                'PROCESSING',
+                'SHIPPED',
+                'DELIVERED',
+                'CANCELLED',
+                'REFUNDED',
+                'FAILED',
+                'COMPLETED',
+            ])->default('PENDING');
             $table->decimal('total_gross', 14, 2)->default(0);
             $table->decimal('total_net', 14, 2)->default(0);
             $table->decimal('vat_amount', 14, 2)->default(0);

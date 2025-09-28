@@ -5,6 +5,10 @@ import '../../App.admin.css';
 import { api } from '../../services/api.js';
 import InfoTooltip from '../../components/InfoTooltip.jsx';
 import { useCurrencyFormatter, useSettings } from '../../context/SettingsContext.jsx';
+import { ORDER_STATUSES } from '../../config/orderStatuses.js';
+
+const DEFAULT_STATUSES = ORDER_STATUSES.filter(status => ['PENDING', 'COMPLETED'].includes(status));
+const STATUS_OPTIONS = ORDER_STATUSES;
 
 export default function AdminAnalytics(){
   const [stats, setStats] = useState(null);
@@ -23,9 +27,7 @@ export default function AdminAnalytics(){
     from.setDate(from.getDate()-29); // default 30 days
     return { from: from.toISOString(), to: to.toISOString() };
   });
-  const [statuses, setStatuses] = useState(['PENDING','PROCESSING','SHIPPED','DELIVERED']);
-  const [includeRefunded, setIncludeRefunded] = useState(false);
-  const [includeCancelled, setIncludeCancelled] = useState(false);
+  const [statuses, setStatuses] = useState(DEFAULT_STATUSES);
   // Advanced analytics
   const [advanced, setAdvanced] = useState(null);
   const [advLoading, setAdvLoading] = useState(false);
@@ -55,13 +57,11 @@ export default function AdminAnalytics(){
       from: range.from,
       to: range.to,
       granularity,
-      statuses,
-      includeRefunded,
-      includeCancelled
+      statuses
     }).then(data => { if(!active) return; setUnified(data); setULoading(false); })
       .catch(e => { if(!active) return; setUError(e.message); setULoading(false); });
     return ()=>{ active = false; };
-  }, [range.from, range.to, granularity, statuses, includeRefunded, includeCancelled]);
+  }, [range.from, range.to, granularity, statuses]);
 
   // Advanced fetch (reuses same date range window)
   useEffect(()=>{
@@ -143,10 +143,6 @@ export default function AdminAnalytics(){
         setRange={setRange}
         statuses={statuses}
         setStatuses={setStatuses}
-        includeRefunded={includeRefunded}
-        setIncludeRefunded={setIncludeRefunded}
-        includeCancelled={includeCancelled}
-        setIncludeCancelled={setIncludeCancelled}
         formatAmount={formatAmount}
         currencyLabel={currencyLabel}
       />
@@ -284,12 +280,14 @@ function ChartSkeleton(){
 
 function StatusFunnel({ stats }) {
   const stages = [
-    { label:'Pending', value: stats.pendingOrders, color:'bg-secondary' },
-    { label:'Processing', value: stats.processingOrders, color:'bg-primary' },
-    { label:'Shipped', value: stats.shippedOrders, color:'bg-info' },
-    { label:'Delivered', value: stats.deliveredOrders, color:'bg-success' },
-    { label:'Cancelled', value: stats.cancelledOrders, color:'bg-warning' },
-    { label:'Refunded', value: stats.refundedOrders, color:'bg-danger' }
+    { label:'Pending', value: Number(stats.pendingOrders ?? 0), color:'bg-secondary' },
+    { label:'Processing', value: Number(stats.processingOrders ?? 0), color:'bg-primary' },
+    { label:'Shipped', value: Number(stats.shippedOrders ?? 0), color:'bg-info' },
+    { label:'Delivered', value: Number(stats.deliveredOrders ?? 0), color:'bg-success' },
+    { label:'Completed', value: Number(stats.completedOrders ?? 0), color:'bg-success' },
+    { label:'Cancelled', value: Number(stats.cancelledOrders ?? 0), color:'bg-warning' },
+    { label:'Refunded', value: Number(stats.refundedOrders ?? 0), color:'bg-danger' },
+    { label:'Failed', value: Number(stats.failedOrders ?? 0), color:'bg-danger' }
   ];
   const max = Math.max(...stages.map(s=>s.value),1);
   return (
@@ -307,8 +305,8 @@ function StatusFunnel({ stats }) {
   );
 }
 
-function UnifiedSection({ unified, loading, error, granularity, onGranularityChange, range, setRange, statuses, setStatuses, includeRefunded, setIncludeRefunded, includeCancelled, setIncludeCancelled, formatAmount, currencyLabel }) {
-  const tip = 'Average Order Value vs Time: buckets with gross revenue, order counts, derived AOV, and overall aggregates. Filters: statuses, refunded/cancelled inclusion, date range.';
+function UnifiedSection({ unified, loading, error, granularity, onGranularityChange, range, setRange, statuses, setStatuses, formatAmount, currencyLabel }) {
+  const tip = 'Average Order Value vs Time: buckets with gross revenue, order counts, derived AOV, and overall aggregates. Filters: order statuses, and date range.';
   const buckets = unified?.buckets || [];
   const current = buckets[buckets.length-1];
   const previous = buckets[buckets.length-2];
@@ -329,13 +327,27 @@ function UnifiedSection({ unified, loading, error, granularity, onGranularityCha
     from.setDate(from.getDate()-(days-1));
     setRange({ from: from.toISOString(), to: to.toISOString() });
   }
-
-  const statusOptions = ['PENDING','PROCESSING','SHIPPED','DELIVERED'];
+  const statusOptions = STATUS_OPTIONS;
   function toggleStatus(s){
-    setStatuses(prev => prev.includes(s) ? prev.filter(x=>x!==s) : [...prev, s]);
+    setStatuses(prev => {
+      const nextSet = new Set(prev);
+      if (nextSet.has(s)) {
+        nextSet.delete(s);
+      } else {
+        nextSet.add(s);
+      }
+      if (nextSet.size === 0) {
+        return [...DEFAULT_STATUSES];
+      }
+      return statusOptions.filter(option => nextSet.has(option));
+    });
   }
 
-  const subtitle = `Range: ${range.from.slice(0,10)} → ${range.to.slice(0,10)} (Statuses: ${statuses.join(', ')}${includeRefunded?', REFUNDED':''}${includeCancelled?', CANCELLED':''})`;
+  const orderedSelected = statusOptions.filter(s => statuses.includes(s));
+  const subtitleStatuses = orderedSelected.length === statusOptions.length ? 'All' : orderedSelected.join(', ');
+  const allSelected = orderedSelected.length === statusOptions.length;
+  const defaultSelected = DEFAULT_STATUSES.every(status => orderedSelected.includes(status));
+  const subtitle = `Range: ${range.from.slice(0,10)} → ${range.to.slice(0,10)} (Statuses: ${subtitleStatuses})`;
 
   return (
     <section className="mb-5" aria-label={tip}>
@@ -356,17 +368,17 @@ function UnifiedSection({ unified, loading, error, granularity, onGranularityCha
         </div>
       </div>
       <div className="d-flex flex-wrap gap-2 mb-3 align-items-center">
-        {statusOptions.map(s => (
-          <button key={s} type="button" className={`btn btn-sm ${statuses.includes(s)?'btn-secondary':'btn-outline-secondary'}`} onClick={()=>toggleStatus(s)}>{s}</button>
-        ))}
-        <div className="form-check form-check-inline small">
-          <input className="form-check-input" type="checkbox" id="incRefunded" checked={includeRefunded} onChange={e=>setIncludeRefunded(e.target.checked)} />
-          <label className="form-check-label" htmlFor="incRefunded">Refunded</label>
-        </div>
-        <div className="form-check form-check-inline small">
-          <input className="form-check-input" type="checkbox" id="incCancelled" checked={includeCancelled} onChange={e=>setIncludeCancelled(e.target.checked)} />
-          <label className="form-check-label" htmlFor="incCancelled">Cancelled</label>
-        </div>
+        {statusOptions.map(s => {
+          const isSelected = statuses.includes(s);
+          const emphasis = ['CANCELLED','FAILED','REFUNDED'].includes(s)
+            ? (isSelected ? 'btn-danger' : 'btn-outline-danger')
+            : isSelected ? 'btn-secondary' : 'btn-outline-secondary';
+          return (
+            <button key={s} type="button" className={`btn btn-sm ${emphasis}`} onClick={()=>toggleStatus(s)}>{s}</button>
+          );
+        })}
+  <button type="button" className="btn btn-sm btn-outline-secondary" onClick={()=>setStatuses([...statusOptions])} disabled={allSelected}>Select All</button>
+  <button type="button" className="btn btn-sm btn-outline-secondary" onClick={()=>setStatuses([...DEFAULT_STATUSES])} disabled={defaultSelected}>Default</button>
       </div>
       {loading && <ChartSkeleton />}
       {error && <div className="alert alert-danger small mb-0">{error}</div>}

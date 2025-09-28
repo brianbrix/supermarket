@@ -1,0 +1,14 @@
+export const ORDER_STATUSES = [
+  'PENDING',
+  'PROCESSING',
+  'SHIPPED',
+  'DELIVERED',
+  'CANCELLED',
+  'REFUNDED',
+  'FAILED',
+  'COMPLETED'
+];
+
+export const ACTIVE_ORDER_STATUSES = ORDER_STATUSES.filter(status => !['CANCELLED','REFUNDED','FAILED'].includes(status));
+
+export const TERMINAL_ORDER_STATUSES = ['DELIVERED','COMPLETED','CANCELLED','REFUNDED','FAILED'];

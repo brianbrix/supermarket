@@ -73,6 +73,12 @@ export const api = {
       return request(`/products/price-range${qs}`);
     },
     byCategory: (cat) => request(`/products/category/${encodeURIComponent(cat)}`),
+    related: (id, { limit = 6 } = {}) => {
+      const params = new URLSearchParams();
+      if (limit != null) params.set('limit', limit);
+      const qs = params.toString();
+      return request(`/products/${id}/related${qs ? `?${qs}` : ''}`);
+    },
     search: ({ q, categoryId, minPrice, maxPrice, inStock, page=0, size=10 } = {}) => {
       const params = new URLSearchParams();
       if (q) params.set('q', q);

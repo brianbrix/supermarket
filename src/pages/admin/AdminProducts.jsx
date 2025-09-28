@@ -3,6 +3,8 @@ import { api, mapProductResponse } from '../../services/api.js';
 import FilterBar from '../../components/FilterBar.jsx';
 import PaginationBar from '../../components/PaginationBar.jsx';
 
+const makeEmptyForm = () => ({ name: '', categoryId: '', price: '', description: '', stock: '0', unit: '' });
+
 export default function AdminProducts() {
   const [products, setProducts] = useState([]);
   const [pageMeta, setPageMeta] = useState({ page:0, size:10, totalElements:0, totalPages:0, first:true, last:true });
@@ -10,7 +12,7 @@ export default function AdminProducts() {
   const [size, setSize] = useState(20);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(null);
-  const [form, setForm] = useState({ name:'', categoryId:'', price:'', description:'', stock:0, unit:'' });
+  const [form, setForm] = useState(makeEmptyForm);
   const [imageFile, setImageFile] = useState(null); // legacy single upload (kept for backward compatibility)
   const [multiUploading, setMultiUploading] = useState(false);
   const [multiError, setMultiError] = useState(null);
@@ -24,6 +26,17 @@ export default function AdminProducts() {
   const [categories, setCategories] = useState([]);
   const [submitting, setSubmitting] = useState(false);
   const [editingId, setEditingId] = useState(null);
+  const resetFormState = () => {
+    setForm(makeEmptyForm());
+    setImageFile(null);
+    setMultiError(null);
+    setError(null);
+  };
+  const beginCreateFlow = () => {
+    setEditingId(null);
+    resetFormState();
+    window.scrollTo({ top: document.body.scrollHeight, behavior: 'smooth' });
+  };
 
   function load(immediate=false) {
     if(!immediate) setLoading(true);
@@ -78,14 +91,21 @@ export default function AdminProducts() {
     setForm(f => ({ ...f, [name]: value }));
   }
 
+  function handleCancel(){
+    setEditingId(null);
+    resetFormState();
+  }
+
   function handleEdit(p) {
     setEditingId(p.id);
+    setError(null);
+    setMultiError(null);
     setForm({
-      name: p.name,
-      categoryId: p.categoryId || '',
-      price: p.price,
+      name: p.name || '',
+      categoryId: p.categoryId != null ? String(p.categoryId) : '',
+      price: p.price != null ? String(p.price) : '',
       description: p.description || '',
-      stock: p.stock || 0,
+      stock: p.stock != null ? String(p.stock) : '0',
       unit: p.unit || ''
     });
     setImageFile(null);
@@ -94,15 +114,29 @@ export default function AdminProducts() {
   async function handleSubmit(e){
     e.preventDefault();
     setSubmitting(true);
+  setError(null);
     try {
+      const trimmedName = form.name.trim();
+      const categoryId = form.categoryId ? Number(form.categoryId) : null;
+      const priceValue = Number(form.price);
+      const stockValue = form.stock === '' ? 0 : Number(form.stock);
+      if (!trimmedName) {
+        throw new Error('Product name is required.');
+      }
+      if (Number.isNaN(priceValue)) {
+        throw new Error('Price must be a valid number.');
+      }
+      if (Number.isNaN(stockValue)) {
+        throw new Error('Stock must be a valid number.');
+      }
       const payload = {
-        name: form.name,
-        categoryId: form.categoryId ? Number(form.categoryId) : null,
-        price: Number(form.price),
+        name: trimmedName,
+        category_id: categoryId,
+        price: priceValue,
         description: form.description,
-        imageUrl: null,
-        stock: Number(form.stock),
-        unit: form.unit || null
+        image_url: null,
+        stock: stockValue,
+        unit: form.unit ? form.unit.trim() : null
       };
       let created;
       if (editingId) {
@@ -113,9 +147,8 @@ export default function AdminProducts() {
       if (imageFile) {
         await api.products.uploadImage(created.id, imageFile);
       }
-  setForm({ name:'', categoryId:'', price:'', description:'', stock:0, unit:'' });
       setEditingId(null);
-      setImageFile(null);
+      resetFormState();
       load();
     } catch (err) {
       setError(err.message);
@@ -171,7 +204,7 @@ export default function AdminProducts() {
           <button
             type="button"
             className="btn btn-primary btn-sm"
-            onClick={()=>{ setEditingId(null); setForm({ name:'', categoryId:'', price:'', description:'', stock:0, unit:'' }); setImageFile(null); window.scrollTo({ top: document.body.scrollHeight, behavior:'smooth'}); }}
+            onClick={beginCreateFlow}
           >New Product</button>
         </div>
       </div>
@@ -246,16 +279,36 @@ export default function AdminProducts() {
           <div className="card">
             <div className="card-body">
               <h2 className="h6 mb-3">{editingId ? 'Edit Product' : 'Create Product'}</h2>
-              <form onSubmit={handleSubmit} className="vstack gap-2">
-                <input required name="name" value={form.name} onChange={handleChange} className="form-control" placeholder="Name" />
-                <select name="categoryId" value={form.categoryId} onChange={handleChange} className="form-select">
-                  <option value="">No Category</option>
-                  {categories.map(c => <option key={c.id} value={c.id}>{c.name}</option>)}
-                </select>
-                <input required type="number" min="0" step="0.01" name="price" value={form.price} onChange={handleChange} className="form-control" placeholder="Price" />
-                <input name="unit" value={form.unit} onChange={handleChange} className="form-control" placeholder="Unit (e.g. kg, pc)" />
-                <textarea name="description" value={form.description} onChange={handleChange} className="form-control" placeholder="Description" rows={2}></textarea>
-                <input type="number" min="0" name="stock" value={form.stock} onChange={handleChange} className="form-control" placeholder="Stock" />
+              <form onSubmit={handleSubmit} className="vstack gap-3">
+                <div>
+                  <label htmlFor="product-name" className="form-label">Name</label>
+                  <input id="product-name" required name="name" value={form.name} onChange={handleChange} className="form-control" placeholder="Name" />
+                </div>
+                <div>
+                  <label htmlFor="product-category" className="form-label">Category</label>
+                  <select id="product-category" name="categoryId" value={form.categoryId} onChange={handleChange} className="form-select">
+                    <option value="">No Category</option>
+                    {categories.map(c => <option key={c.id} value={c.id}>{c.name}</option>)}
+                  </select>
+                </div>
+                <div className="row g-2">
+                  <div className="col-12 col-sm-6">
+                    <label htmlFor="product-price" className="form-label">Price</label>
+                    <input id="product-price" required type="number" min="0" step="0.01" name="price" value={form.price} onChange={handleChange} className="form-control" placeholder="0.00" />
+                  </div>
+                  <div className="col-12 col-sm-6">
+                    <label htmlFor="product-unit" className="form-label">Unit</label>
+                    <input id="product-unit" name="unit" value={form.unit} onChange={handleChange} className="form-control" placeholder="e.g. kg, pc" />
+                  </div>
+                </div>
+                <div>
+                  <label htmlFor="product-description" className="form-label">Description</label>
+                  <textarea id="product-description" name="description" value={form.description} onChange={handleChange} className="form-control" placeholder="Short description" rows={2}></textarea>
+                </div>
+                <div>
+                  <label htmlFor="product-stock" className="form-label">Stock</label>
+                  <input id="product-stock" type="number" min="0" name="stock" value={form.stock} onChange={handleChange} className="form-control" placeholder="0" />
+                </div>
                 {editingId && (
                   <div className="mt-3 border rounded p-2">
                     <div className="d-flex justify-content-between align-items-center mb-2">
@@ -287,7 +340,7 @@ export default function AdminProducts() {
                 )}
                 <div className="d-flex gap-2">
                   <button disabled={submitting} type="submit" className="btn btn-primary flex-grow-1">{submitting ? 'Saving...' : 'Save'}</button>
-                  {editingId && <button type="button" className="btn btn-outline-secondary" onClick={()=>{setEditingId(null); setForm({ name:'', categoryId:'', price:'', description:'', stock:0, unit:'' }); setImageFile(null);}}>Cancel</button>}
+                  {editingId && <button type="button" className="btn btn-outline-secondary" onClick={handleCancel}>Cancel</button>}
                 </div>
               </form>
             </div>

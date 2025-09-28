@@ -13,15 +13,19 @@ function fallbackProductName(item) {
 
 export function normalizeOrder(raw) {
   if (!raw) return null;
-  const createdAt = raw.createdAt ?? raw.created_at ?? raw.placedAt ?? null;
-  const updatedAt = raw.updatedAt ?? raw.updated_at ?? null;
-  const orderNumber = raw.orderNumber ?? raw.order_number ?? raw.orderRef ?? raw.reference ?? null;
-  const totalGross = toNumber(raw.totalGross ?? raw.total_gross ?? raw.total ?? 0, 0);
-  const totalNetRaw = raw.totalNet ?? raw.total_net;
-  const vatAmountRaw = raw.vatAmount ?? raw.vat_amount;
+  const sourceWrapper = raw && typeof raw === 'object' && !Array.isArray(raw) && raw.data && typeof raw.data === 'object'
+    ? { ...raw, ...raw.data }
+    : raw;
+  const { data: _discard, ...source } = sourceWrapper;
+  const createdAt = source.createdAt ?? source.created_at ?? source.placedAt ?? null;
+  const updatedAt = source.updatedAt ?? source.updated_at ?? null;
+  const orderNumber = source.orderNumber ?? source.order_number ?? source.orderRef ?? source.reference ?? null;
+  const totalGross = toNumber(source.totalGross ?? source.total_gross ?? source.total ?? 0, 0);
+  const totalNetRaw = source.totalNet ?? source.total_net;
+  const vatAmountRaw = source.vatAmount ?? source.vat_amount;
 
-  const items = Array.isArray(raw.items)
-    ? raw.items.map(item => {
+  const items = Array.isArray(source.items)
+    ? source.items.map(item => {
         const product = item.product ?? {};
         const unitGross = toNumber(item.unitPriceGross ?? item.unit_price_gross ?? item.unitPrice ?? item.price, 0);
         const unitNet = toNumber(item.unitPriceNet ?? item.unit_price_net, unitGross / (1 + VAT_RATE));
@@ -47,12 +51,12 @@ export function normalizeOrder(raw) {
     : [];
 
   const normalized = {
-    ...raw,
-    id: raw.id ?? raw.orderId ?? raw.order_id ?? null,
+    ...source,
+    id: source.id ?? source.orderId ?? source.order_id ?? null,
     orderNumber,
-    customerName: raw.customerName ?? raw.customer_name ?? raw.customer ?? '',
-    customerPhone: raw.customerPhone ?? raw.customer_phone ?? raw.phone ?? '',
-    status: raw.status ?? raw.orderStatus ?? raw.state ?? 'PENDING',
+    customerName: source.customerName ?? source.customer_name ?? source.customer ?? '',
+    customerPhone: source.customerPhone ?? source.customer_phone ?? source.phone ?? '',
+    status: source.status ?? source.orderStatus ?? source.state ?? 'PENDING',
     totalGross,
     totalNet: toNumber(totalNetRaw, totalGross / (1 + VAT_RATE)),
     vatAmount: toNumber(vatAmountRaw, totalGross - toNumber(totalNetRaw, totalGross / (1 + VAT_RATE))),

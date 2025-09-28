@@ -7,6 +7,7 @@ import { useState, useMemo, useEffect } from 'react';
 import QuantityStepper from '../components/QuantityStepper.jsx';
 import ImageWithFallback from '../components/ImageWithFallback.jsx';
 import { useCurrencyFormatter } from '../context/SettingsContext.jsx';
+import ProductCard from '../components/ProductCard.jsx';
 
 export default function ProductDetail() {
   const { id } = useParams();
@@ -14,6 +15,9 @@ export default function ProductDetail() {
   const [product, setProduct] = useState(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(null);
+  const [relatedProducts, setRelatedProducts] = useState([]);
+  const [relatedLoading, setRelatedLoading] = useState(false);
+  const [relatedError, setRelatedError] = useState(null);
   useEffect(()=>{
     let active=true;
     api.products.get(id)
@@ -21,6 +25,31 @@ export default function ProductDetail() {
       .catch(e => { if(!active) return; setError(e.message); setLoading(false); });
     return ()=>{ active=false; };
   },[id]);
+  useEffect(() => {
+    if (!product?.id) {
+      setRelatedProducts([]);
+      setRelatedLoading(false);
+      setRelatedError(null);
+      return;
+    }
+    let active = true;
+    setRelatedLoading(true);
+    setRelatedError(null);
+    api.products.related(product.id, { limit: 6 })
+      .then(res => {
+        if (!active) return;
+        const rawList = Array.isArray(res?.data) ? res.data : (Array.isArray(res) ? res : []);
+        const mapped = rawList.map(mapProductResponse).filter(p => p.id !== product.id);
+        setRelatedProducts(mapped);
+        setRelatedLoading(false);
+      })
+      .catch(err => {
+        if (!active) return;
+        setRelatedError(err.message);
+        setRelatedLoading(false);
+      });
+    return () => { active = false; };
+  }, [product?.id]);
   const { addItem } = useCart();
   const { push } = useToast();
   const [qty, setQty] = useState(1);
@@ -85,6 +114,24 @@ export default function ProductDetail() {
             </div>
           </div>
         </div>
+      </div>
+      <div className="mt-5">
+        <h2 className="h5 mb-3">You might also like</h2>
+        {relatedLoading ? (
+          <p className="text-muted">Loading related products…</p>
+        ) : relatedError ? (
+          <p className="text-danger small">{relatedError}</p>
+        ) : relatedProducts.length === 0 ? (
+          <p className="text-muted">No related products to show right now.</p>
+        ) : (
+          <div className="row g-3">
+            {relatedProducts.map(rp => (
+              <div key={rp.id} className="col-12 col-sm-6 col-lg-3">
+                <ProductCard product={rp} />
+              </div>
+            ))}
+          </div>
+        )}
       </div>
     </section>
   );
