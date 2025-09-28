@@ -37,7 +37,11 @@ RUN mkdir -p \
     && php artisan package:discover --ansi \
     && chown -R www-data:www-data storage bootstrap/cache
 
+COPY docker/backend/entrypoint.sh /entrypoint.sh
+RUN chmod +x /entrypoint.sh
+
 USER www-data
 
 EXPOSE 8000
+ENTRYPOINT ["/entrypoint.sh"]
 CMD ["php", "artisan", "serve", "--host=0.0.0.0", "--port=8000"]

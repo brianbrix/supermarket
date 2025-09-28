@@ -94,6 +94,8 @@ Common optimization-friendly commands:
 - `TRAEFIK_NETWORK` identifies the external network shared with your Traefik reverse proxy (defaults to `traefik_proxy`).
 - `TRAEFIK_ACME_VOLUME` customizes the persistent volume name used by the Traefik companion stack for certificate storage.
 - `BACKEND_LOG_PATH` sets the host directory that receives Laravel log files (defaults to `/var/log/supermarket-backend`). Create it with writable permissions before starting the stack, or override the path in your shell.
+- `MIGRATION_ATTEMPTS` and `MIGRATION_RETRY_DELAY` control how many times (default 10) and how often (default 5s) the backend container retries `php artisan migrate --force` on startup if the database is not ready yet.
+- If `APP_KEY` is not supplied via environment variable, the backend container will generate one automatically on first boot.
 - Set `APP_KEY` in your shell before `docker compose up` to rotate the Laravel encryption key without editing tracked files.
 
 ### Traefik dashboard access (optional helper)

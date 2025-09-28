@@ -39,7 +39,7 @@ services:
     volumes:
       - backend-storage:/var/www/html/storage
       - backend-cache:/var/www/html/bootstrap/cache
-      - ${BACKEND_LOG_PATH:-/var/log/supermarket-backend}:/var/www/html/storage/logs
+      - /var/log/supermarket-backend:/var/www/html/storage/logs
     ports:
       - "8081:8000"
     depends_on:
