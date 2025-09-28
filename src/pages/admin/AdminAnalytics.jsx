@@ -1,9 +1,10 @@
-import { useEffect, useState, useMemo } from 'react';
+import { useEffect, useState, useMemo, useCallback } from 'react';
 import { createPortal } from 'react-dom';
 import { buildTooltip } from '../../utils/metricsGlossary';
 import '../../App.admin.css';
 import { api } from '../../services/api.js';
 import InfoTooltip from '../../components/InfoTooltip.jsx';
+import { useCurrencyFormatter, useSettings } from '../../context/SettingsContext.jsx';
 
 export default function AdminAnalytics(){
   const [stats, setStats] = useState(null);
@@ -29,6 +30,10 @@ export default function AdminAnalytics(){
   const [advanced, setAdvanced] = useState(null);
   const [advLoading, setAdvLoading] = useState(false);
   const [advError, setAdvError] = useState(null);
+  const formatCurrency = useCurrencyFormatter();
+  const { settings } = useSettings();
+  const currencyLabel = settings?.currency?.symbol || settings?.currency?.code || 'KES';
+  const formatAmount = useCallback((value, override) => formatCurrency(Number(value ?? 0), override), [formatCurrency]);
 
   useEffect(()=>{
     let active = true;
@@ -79,7 +84,7 @@ export default function AdminAnalytics(){
       {stats && (
         <div className="row g-3 mb-4">
           <AnalyticCard title="Total Orders" value={stats.totalOrders} accent="info" />
-          <AnalyticCard title="Revenue" value={`KES ${Number(stats.totalRevenue||0).toFixed(2)}`} accent="success" />
+          <AnalyticCard title="Revenue" value={formatAmount(stats.totalRevenue)} accent="success" />
           <AnalyticCard title="Products" value={stats.totalProducts} accent="warning" />
           <AnalyticCard title="Admins" value={stats.totalAdmins} accent="danger" />
           <AnalyticCard title="Pending" value={stats.pendingOrders} accent="info" />
@@ -142,8 +147,10 @@ export default function AdminAnalytics(){
         setIncludeRefunded={setIncludeRefunded}
         includeCancelled={includeCancelled}
         setIncludeCancelled={setIncludeCancelled}
+        formatAmount={formatAmount}
+        currencyLabel={currencyLabel}
       />
-      <RevenueTrendSection unified={unified} />
+      <RevenueTrendSection unified={unified} formatAmount={formatAmount} currencyLabel={currencyLabel} />
   <AdvancedSections advanced={advanced} loading={advLoading} error={advError} />
       <section className="mb-5">
         <h2 className="h6 mb-3">Coming Soon</h2>
@@ -187,22 +194,30 @@ function AnalyticCard({ title, value, accent }) {
   );
 }
 
-function MiniBarChart({ data, height=160 }) {
+function MiniBarChart({ data, formatAmount, currencyLabel, height=160 }) {
   const [hoverKey, setHoverKey] = useState(null);
   const [coords, setCoords] = useState({x:0,y:0});
   const max = Math.max(...data.map(d => Number(d.revenue)), 1);
+  const label = currencyLabel || 'KES';
+  const formatValue = typeof formatAmount === 'function'
+    ? (value) => formatAmount(value)
+    : (value) => {
+        const target = Number(value ?? 0);
+        return Number.isFinite(target) ? `${label} ${target.toFixed(2)}` : `${label} 0.00`;
+      };
   return (
     <div className="position-relative">
       <div className="d-flex align-items-end gap-1" style={{height:`${height}px`, overflowX:'auto'}}>
         {data.map(d => {
           const h = (Number(d.revenue)/max)*(height-40); // reserve top space for tooltip
+          const formattedRevenue = formatValue(d.revenue);
           return (
             <div key={d.key} className="d-flex flex-column align-items-center position-relative" style={{minWidth:'34px'}}
                  onMouseEnter={e=>{ const rect=e.currentTarget.getBoundingClientRect(); setCoords({x:rect.left+rect.width/2, y:rect.top-6}); setHoverKey(d.key);} }
                  onMouseLeave={()=>setHoverKey(k=>k===d.key?null:k)}>
-              <div className="w-100 rounded-top bg-success position-relative" style={{height:`${h}px`, transition:'height .3s'}} role="img" aria-label={`Revenue ${d.label}: KES ${Number(d.revenue).toFixed(2)}`}></div>
+              <div className="w-100 rounded-top bg-success position-relative" style={{height:`${h}px`, transition:'height .3s'}} role="img" aria-label={`Revenue ${d.label}: ${formattedRevenue}`}></div>
               <small className="text-muted mt-1" style={{fontSize:'0.55rem'}}>{d.label}</small>
-              {hoverKey === d.key && <ChartTooltipPortal x={coords.x} y={coords.y} children={`KES ${Number(d.revenue).toFixed(2)}`} />}
+              {hoverKey === d.key && <ChartTooltipPortal x={coords.x} y={coords.y} children={formattedRevenue} />}
             </div>
           );
         })}
@@ -212,7 +227,7 @@ function MiniBarChart({ data, height=160 }) {
 }
 
 // Unified revenue trend derived from unified buckets so gross matches AOV sums.
-function RevenueTrendSection({ unified }) {
+function RevenueTrendSection({ unified, formatAmount, currencyLabel }) {
   const buckets = unified?.buckets || [];
   const data = useMemo(()=> buckets.map(b => ({ key: b.start, label: b.start.slice(5,10), revenue: b.gross })), [buckets]);
   const stats = useMemo(()=>{
@@ -229,6 +244,13 @@ function RevenueTrendSection({ unified }) {
     if(prev === 0) return null;
     return ((last - prev)/prev)*100;
   },[data]);
+  const label = currencyLabel || 'KES';
+  const formatValue = typeof formatAmount === 'function'
+    ? (value) => formatAmount(value)
+    : (value) => {
+        const target = Number(value ?? 0);
+        return Number.isFinite(target) ? `${label} ${target.toFixed(2)}` : `${label} 0.00`;
+      };
   const trendTooltip = 'Unified revenue trend: each bar = bucket gross. Uses same filters & range as AOV; values will match Gross (Sum) total.';
   return (
     <section className="mb-5" aria-label={trendTooltip}>
@@ -237,12 +259,12 @@ function RevenueTrendSection({ unified }) {
           <span className={`badge ms-2 ${change>0?'text-bg-success':'text-bg-danger'}`}>{change>0?'+':''}{change.toFixed(1)}%</span>
         )}<InfoTooltip text={trendTooltip} /></h2>
       </div>
-      {data.length === 0 ? <ChartSkeleton /> : <MiniBarChart data={data} />}
+      {data.length === 0 ? <ChartSkeleton /> : <MiniBarChart data={data} formatAmount={formatAmount} currencyLabel={currencyLabel} />}
       {stats && (
         <div className="row row-cols-2 row-cols-sm-4 g-2 mt-3 small">
-          <div className="col"><div className="p-2 bg-body-tertiary rounded">Total<br/><strong>KES {stats.total.toFixed(2)}</strong></div></div>
-          <div className="col"><div className="p-2 bg-body-tertiary rounded">Average<br/><strong>KES {stats.avg.toFixed(2)}</strong></div></div>
-          <div className="col"><div className="p-2 bg-body-tertiary rounded">Best Bucket<br/><strong>KES {Number(stats.best.revenue).toFixed(2)}</strong></div></div>
+          <div className="col"><div className="p-2 bg-body-tertiary rounded">Total<br/><strong>{formatValue(stats.total)}</strong></div></div>
+          <div className="col"><div className="p-2 bg-body-tertiary rounded">Average<br/><strong>{formatValue(stats.avg)}</strong></div></div>
+          <div className="col"><div className="p-2 bg-body-tertiary rounded">Best Bucket<br/><strong>{formatValue(stats.best.revenue)}</strong></div></div>
           <div className="col"><div className="p-2 bg-body-tertiary rounded">Buckets<br/><strong>{data.length}</strong></div></div>
         </div>
       )}
@@ -285,7 +307,7 @@ function StatusFunnel({ stats }) {
   );
 }
 
-function UnifiedSection({ unified, loading, error, granularity, onGranularityChange, range, setRange, statuses, setStatuses, includeRefunded, setIncludeRefunded, includeCancelled, setIncludeCancelled }) {
+function UnifiedSection({ unified, loading, error, granularity, onGranularityChange, range, setRange, statuses, setStatuses, includeRefunded, setIncludeRefunded, includeCancelled, setIncludeCancelled, formatAmount, currencyLabel }) {
   const tip = 'Average Order Value vs Time: buckets with gross revenue, order counts, derived AOV, and overall aggregates. Filters: statuses, refunded/cancelled inclusion, date range.';
   const buckets = unified?.buckets || [];
   const current = buckets[buckets.length-1];
@@ -293,7 +315,13 @@ function UnifiedSection({ unified, loading, error, granularity, onGranularityCha
   const percentChange = current && previous && previous.aov && previous.aov !== 0 ? ((Number(current.aov) - Number(previous.aov)) / Number(previous.aov))*100 : null;
   const totalOrders = unified?.aggregates?.totalOrders || 0;
   const totalGross = Number(unified?.aggregates?.totalGross || 0);
-  const overallAov = unified?.aggregates?.overallAov || 0;
+  const label = currencyLabel || 'KES';
+  const formatValue = typeof formatAmount === 'function'
+    ? (value) => formatAmount(value)
+    : (value) => {
+        const target = Number(value ?? 0);
+        return Number.isFinite(target) ? `${label} ${target.toFixed(2)}` : `${label} 0.00`;
+      };
 
   function onDateRangeChange(days){
     const to = new Date();
@@ -343,24 +371,31 @@ function UnifiedSection({ unified, loading, error, granularity, onGranularityCha
       {loading && <ChartSkeleton />}
       {error && <div className="alert alert-danger small mb-0">{error}</div>}
       {buckets.length === 0 && !loading && !error && <p className="text-muted small mb-0">No orders in range.</p>}
-      {buckets.length>0 && !loading && !error && <AovMiniChart points={buckets.map(b=>({ start:b.start, end:b.end, aov:b.aov, orderCount:b.orderCount, grossTotal:b.gross }))} granularity={granularity} />}
+      {buckets.length>0 && !loading && !error && <AovMiniChart points={buckets.map(b=>({ start:b.start, end:b.end, aov:b.aov, orderCount:b.orderCount, grossTotal:b.gross }))} granularity={granularity} formatAmount={formatAmount} currencyLabel={currencyLabel} />}
       {unified && !loading && !error && (
         <div className="row row-cols-2 row-cols-sm-5 g-2 mt-3 small">
-          <div className="col"><div className="p-2 bg-body-tertiary rounded">Current AOV<br/><strong>KES {current?Number(current.aov||0).toFixed(2):'0.00'}</strong></div></div>
-          <div className="col"><div className="p-2 bg-body-tertiary rounded">Previous AOV<br/><strong>KES {previous?Number(previous.aov||0).toFixed(2):'0.00'}</strong></div></div>
+          <div className="col"><div className="p-2 bg-body-tertiary rounded">Current AOV<br/><strong>{current ? formatValue(current.aov) : formatValue(0)}</strong></div></div>
+          <div className="col"><div className="p-2 bg-body-tertiary rounded">Previous AOV<br/><strong>{previous ? formatValue(previous.aov) : formatValue(0)}</strong></div></div>
           <div className="col"><div className="p-2 bg-body-tertiary rounded">Buckets<br/><strong>{buckets.length}</strong></div></div>
           <div className="col"><div className="p-2 bg-body-tertiary rounded">Orders (Total)<br/><strong>{totalOrders}</strong></div></div>
-          <div className="col"><div className="p-2 bg-body-tertiary rounded">Gross (Sum)<br/><strong>KES {totalGross.toFixed(2)}</strong></div></div>
+          <div className="col"><div className="p-2 bg-body-tertiary rounded">Gross (Sum)<br/><strong>{formatValue(totalGross)}</strong></div></div>
         </div>
       )}
     </section>
   );
 }
 
-function AovMiniChart({ points, granularity, height=160 }) {
+function AovMiniChart({ points, granularity, formatAmount, currencyLabel, height=160 }) {
   const [hoverIndex, setHoverIndex] = useState(null);
   const [coords, setCoords] = useState({x:0,y:0});
   const max = Math.max(...points.map(p => Number(p.aov)), 1);
+  const currencyTag = currencyLabel || 'KES';
+  const formatValue = typeof formatAmount === 'function'
+    ? (value) => formatAmount(value)
+    : (value) => {
+        const target = Number(value ?? 0);
+        return Number.isFinite(target) ? `${currencyTag} ${target.toFixed(2)}` : `${currencyTag} 0.00`;
+      };
   return (
     <div className="position-relative">
       {/* Removed horizontal scrolling: bars now flex to available width */}
@@ -368,21 +403,23 @@ function AovMiniChart({ points, granularity, height=160 }) {
         {points.map((p,i) => {
           const val = Number(p.aov);
           const h = (val/max)*(height-40);
-          const label = granularity === 'DAILY' ? p.start.slice(5,10) : granularity === 'WEEKLY' ? p.start.slice(5,10) : p.start.slice(0,7);
+          const bucketLabel = granularity === 'DAILY' ? p.start.slice(5,10) : granularity === 'WEEKLY' ? p.start.slice(5,10) : p.start.slice(0,7);
           const gross = Number(p.grossTotal || 0);
           const orders = p.orderCount || 0;
+          const formattedAov = formatValue(val);
+          const formattedGross = formatValue(gross);
           return (
             <div key={i} className="d-flex flex-column align-items-center position-relative" style={{flex:'1 1 0'}}
                  onMouseEnter={e=>{ const rect=e.currentTarget.getBoundingClientRect(); setCoords({x:rect.left+rect.width/2, y:rect.top-8}); setHoverIndex(i);} }
                  onMouseLeave={()=>setHoverIndex(h=>h===i?null:h)}>
-              <div className="w-100 rounded-top bg-info position-relative" style={{height:`${h}px`, transition:'height .3s'}} role="img" aria-label={`AOV ${label}: KES ${val.toFixed(2)}`}></div>
-              <small className="text-muted mt-1" style={{fontSize:'0.55rem'}}>{label}</small>
+              <div className="w-100 rounded-top bg-info position-relative" style={{height:`${h}px`, transition:'height .3s'}} role="img" aria-label={`AOV ${bucketLabel}: ${formattedAov}`}></div>
+              <small className="text-muted mt-1" style={{fontSize:'0.55rem'}}>{bucketLabel}</small>
               {hoverIndex === i && (
                 <ChartTooltipPortal x={coords.x} y={coords.y}>
-                  <div style={{fontWeight:'600'}}>{label}</div>
-                  <div>AOV: KES {val.toFixed(2)}</div>
+                  <div style={{fontWeight:'600'}}>{bucketLabel}</div>
+                  <div>AOV: {formattedAov}</div>
                   <div>Orders: {orders}</div>
-                  <div>Gross: KES {gross.toFixed(2)}</div>
+                  <div>Gross: {formattedGross}</div>
                 </ChartTooltipPortal>
               )}
             </div>

@@ -1,4 +1,5 @@
 import { useState } from 'react';
+import { Link } from 'react-router-dom';
 import { useAuth } from '../context/AuthContext.jsx';
 
 export default function CustomerLogin() {
@@ -27,7 +28,7 @@ export default function CustomerLogin() {
           <input type="password" className="form-control" value={password} onChange={e=>setPassword(e.target.value)} required />
         </div>
         <button className="btn btn-success w-100" disabled={submitting}>{submitting ? 'Signing in...' : 'Login'}</button>
-        <p className="small text-center mt-3 mb-0">No account? <a href="/register">Register</a></p>
+  <p className="small text-center mt-3 mb-0">No account? <Link to="/register">Register</Link></p>
       </form>
     </div>
   );

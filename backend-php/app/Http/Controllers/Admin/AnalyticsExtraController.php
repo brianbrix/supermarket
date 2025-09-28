@@ -76,7 +76,15 @@ class AnalyticsExtraController extends Controller
 
         $ordersQuery = Order::whereBetween('created_at', [$fromDate, $toDate]);
         if (!empty($statusFilter)) {
-            $ordersQuery->whereIn('status', $statusFilter);
+            $ordersQuery->where(function ($query) use ($statusFilter) {
+                foreach ($statusFilter as $index => $status) {
+                    if ($index === 0) {
+                        $query->where('status', $status);
+                    } else {
+                        $query->orWhere('status', $status);
+                    }
+                }
+            });
         }
         $orders = $ordersQuery->orderBy('created_at')->get(['id','total_gross','created_at','status']);
 

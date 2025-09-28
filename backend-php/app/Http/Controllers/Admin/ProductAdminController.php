@@ -46,6 +46,8 @@ class ProductAdminController extends Controller
                 'categoryName' => optional($p->category)->name,
                 'imageUrl' => $p->image_url,
                 'images' => $images,
+                'createdAt' => $p->created_at?->toIso8601String(),
+                'updatedAt' => $p->updated_at?->toIso8601String(),
             ];
         }, $paginator->items());
 

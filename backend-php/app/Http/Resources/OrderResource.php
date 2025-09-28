@@ -10,7 +10,9 @@ class OrderResource extends JsonResource
     {
         return [
             'id' => $this->id,
+            'orderNumber' => $this->order_number,
             'createdAt' => $this->created_at?->toIso8601String(),
+            'updatedAt' => $this->updated_at?->toIso8601String(),
             'customerName' => $this->customer_name,
             'customerPhone' => $this->customer_phone,
             'status' => $this->status,

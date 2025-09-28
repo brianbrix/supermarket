@@ -14,9 +14,11 @@ export default function AdminLayout() {
           <AdminNavLink to="/admin/products" icon="bi-box-seam" label="Products" collapsed={collapsed} />
           <AdminNavLink to="/admin/categories" icon="bi-tags" label="Categories" collapsed={collapsed} />
           <AdminNavLink to="/admin/orders" icon="bi-receipt-cutoff" label="Orders" collapsed={collapsed} />
+          <AdminNavLink to="/admin/users" icon="bi-people" label="Users" collapsed={collapsed} />
           <AdminNavLink to="/admin/payments" icon="bi-cash-stack" label="Payments" collapsed={collapsed} />
           <AdminNavLink to="/admin/payment-options" icon="bi-sliders" label="Payment Options" collapsed={collapsed} />
           <AdminNavLink to="/admin/analytics" icon="bi-graph-up" label="Analytics" collapsed={collapsed} />
+          <AdminNavLink to="/admin/system-settings" icon="bi-gear-fill" label="System Settings" collapsed={collapsed} />
         </nav>
         <div className="mt-auto pt-3 small text-muted text-center" style={{fontSize:'0.65rem'}}>
           Admin

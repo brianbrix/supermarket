@@ -14,6 +14,11 @@ class Product extends Model
         'name','description','price','stock','unit','category_id','image_url'
     ];
 
+    protected $casts = [
+        'created_at' => 'datetime',
+        'updated_at' => 'datetime',
+    ];
+
     public function category() {
         return $this->belongsTo(Category::class);
     }

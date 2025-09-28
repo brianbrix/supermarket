@@ -27,6 +27,7 @@ class OrderController extends Controller
                 'customerName' => $order->customer_name,
                 'customerPhone' => $order->customer_phone,
                 'status' => $order->status,
+                'orderNumber' => $order->order_number,
                 'totalGross' => (float)$order->total_gross,
                 'totalNet' => (float)$order->total_net,
                 'vatAmount' => (float)$order->vat_amount,
@@ -136,6 +137,7 @@ class OrderController extends Controller
                 'vat_amount' => round($vatTotal,2)
             ]);
             $order->load(['items.product']);
+            $order->setAttribute('orderNumber', $order->order_number);
             return response()->json($order, 201);
         });
     }

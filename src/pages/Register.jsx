@@ -1,4 +1,5 @@
 import { useState } from 'react';
+import { Link } from 'react-router-dom';
 import { useAuth } from '../context/AuthContext.jsx';
 
 export default function Register() {
@@ -42,7 +43,7 @@ export default function Register() {
           </div>
         </div>
         <button className="btn btn-success w-100 mt-3" disabled={submitting}>{submitting ? 'Creating...' : 'Register'}</button>
-        <p className="small text-center mt-3 mb-0">Have an account? <a href="/login">Login</a></p>
+  <p className="small text-center mt-3 mb-0">Have an account? <Link to="/login">Login</Link></p>
       </form>
     </div>
   );

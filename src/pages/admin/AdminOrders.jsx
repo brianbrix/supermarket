@@ -4,7 +4,9 @@ import FilterBar from '../../components/FilterBar.jsx';
 import PaginationBar from '../../components/PaginationBar.jsx';
 import OrderDetailModal from '../../components/admin/OrderDetailModal.jsx';
 import StatusBadge from '../../components/StatusBadge.jsx';
+import { mergeOrders, normalizeOrder } from '../../utils/order.js';
 import '../../App.admin.css';
+import { useCurrencyFormatter, useSettings } from '../../context/SettingsContext.jsx';
 
 const STATUSES = ['PENDING','PROCESSING','SHIPPED','DELIVERED','CANCELLED','REFUNDED'];
 
@@ -23,6 +25,11 @@ export default function AdminOrders() {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(null);
   const [selectedOrder, setSelectedOrder] = useState(null);
+  const [selectedOrderLoading, setSelectedOrderLoading] = useState(false);
+  const formatCurrency = useCurrencyFormatter();
+  const { settings } = useSettings();
+  const currencyLabel = settings?.currency?.symbol || settings?.currency?.code || 'KES';
+  const formatAmount = (value) => formatCurrency(Number(value ?? 0));
 
   function load(immediate=false) {
     if (!immediate) setLoading(true);
@@ -41,10 +48,11 @@ export default function AdminOrders() {
         // Expecting PageResponse shape { content, page, size, ... }
         if (Array.isArray(resp)) {
           // backend might have returned a raw array (fallback)
-            setOrders(resp);
+            setOrders(resp.map(normalizeOrder));
             setPageMeta(pm => ({ ...pm, page, size, totalPages:1, totalElements: resp.length, first:true, last:true }));
         } else {
-          setOrders(resp.content || []);
+          const normalizedContent = (resp.content || []).map(normalizeOrder);
+          setOrders(normalizedContent);
           setPageMeta(resp);
         }
         setLoading(false);
@@ -76,7 +84,10 @@ export default function AdminOrders() {
   async function changeStatus(id, status) {
     try {
       const updated = await api.admin.orders.updateStatus(id, status);
-      setOrders(prev => prev.map(o => o.id === id ? updated : o));
+      setOrders(prev => prev.map(o => o.id === id ? mergeOrders(o, updated) : o));
+      if (selectedOrder?.id === id) {
+        setSelectedOrder(prev => mergeOrders(prev, updated));
+      }
     } catch (e) { setError(e.message); }
   }
 
@@ -124,20 +135,25 @@ export default function AdminOrders() {
           <table className="table table-sm align-middle">
             <thead>
               <tr>
-                <th>ID</th><th>Date</th><th>Customer</th><th>Items</th><th>Total Gross</th><th>Status</th>
+                <th>Order</th><th>Date</th><th>Customer</th><th>Items</th><th>Total Gross ({currencyLabel})</th><th>Status</th>
               </tr>
             </thead>
             <tbody>
               {(orders || []).map(o => (
                 <tr key={o.id} style={{cursor:'pointer'}} onClick={e=>{
                   if (e.target.tagName === 'SELECT' || e.target.closest('select')) return;
-                  setSelectedOrder(o);
+                  openOrder(o);
                 }}>
-                  <td>{o.id}</td>
+                  <td>
+                    <div className="d-flex flex-column">
+                      <span className="fw-semibold">{o.orderNumber ?? o.order_number ?? `#${o.id}`}</span>
+                      {o.orderNumber && <span className="text-muted small">ID #{o.id}</span>}
+                    </div>
+                  </td>
                   <td>{o.createdAt ? new Date(o.createdAt).toLocaleString() : '—'}</td>
                   <td>{o.customerName || '—'}</td>
-                  <td>{(o.items || []).reduce((s,i)=>s + (i.quantity || 0),0)}</td>
-                  <td>{o.totalGross != null ? `KES ${Number(o.totalGross).toFixed(2)}` : '—'}</td>
+                  <td>{(o.items || []).reduce((s,i)=>s + (i.quantity || 0),0) || o.itemsCount || 0}</td>
+                  <td>{o.totalGross != null ? formatAmount(o.totalGross) : '—'}</td>
                   <td style={{minWidth:'140px'}}>
                     <div className={`d-flex flex-column gap-1 status-select ${o.status?.toLowerCase()}`}> 
                       <StatusBadge status={o.status} />
@@ -153,7 +169,23 @@ export default function AdminOrders() {
           <PaginationBar {...pageMeta} size={size} onPageChange={setPage} alwaysVisible sizes={[10,20,50,100]} onPageSizeChange={(newSize)=>{ setSize(newSize); setPage(0); }} />
         </div>
       )}
-      <OrderDetailModal order={selectedOrder} onClose={()=>setSelectedOrder(null)} />
+      <OrderDetailModal order={selectedOrder} loading={selectedOrderLoading} onClose={()=>setSelectedOrder(null)} />
     </div>
   );
+
+  async function openOrder(orderSummary) {
+    if (!orderSummary) return;
+    const normalizedSummary = normalizeOrder(orderSummary);
+    setSelectedOrder(normalizedSummary);
+    try {
+      setSelectedOrderLoading(true);
+      const detailed = await api.orders.get(orderSummary.id);
+      setSelectedOrder(prev => mergeOrders(prev ?? normalizedSummary, detailed));
+    } catch (err) {
+      // keep summary if detail fetch fails
+      setError(err.message);
+    } finally {
+      setSelectedOrderLoading(false);
+    }
+  }
 }

@@ -18,6 +18,8 @@ class PaymentOption extends Model
         'active' => 'boolean',
         'fee_fixed' => 'decimal:2',
         'fee_percent' => 'decimal:4',
-        'meta' => 'array'
+        'meta' => 'array',
+        'created_at' => 'datetime',
+        'updated_at' => 'datetime',
     ];
 }

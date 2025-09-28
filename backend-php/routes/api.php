@@ -10,11 +10,15 @@ use App\Http\Controllers\Admin\AnalyticsAdminController;
 use App\Http\Controllers\Admin\ProductAdminController;
 use App\Http\Controllers\Admin\CategoryAdminController;
 use App\Http\Controllers\Admin\PaymentOptionAdminController;
+use App\Http\Controllers\Admin\SystemSettingController as AdminSystemSettingController;
 use App\Http\Controllers\API\PaymentController;
 use App\Http\Controllers\API\OrderController;
 use App\Http\Controllers\API\PaymentOptionPublicController;
 use App\Http\Controllers\Admin\AnalyticsExtraController;
+use App\Http\Controllers\Admin\UserAdminController;
 use App\Http\Controllers\Auth\AuthController;
+use App\Http\Controllers\API\SystemSettingController as PublicSystemSettingController;
+use App\Http\Controllers\API\UserPreferenceController;
 
 Route::get('/products', [ProductController::class, 'index']);
 Route::get('/products/price-range', [ProductController::class, 'priceRange']);
@@ -35,6 +39,7 @@ Route::post('/payments/manual/reconcile', [PaymentController::class, 'reconcileM
 Route::get('/payments/order/{orderId}', [PaymentController::class, 'getByOrder']);
 Route::post('/payments/order/{orderId}/fail', [PaymentController::class, 'failByOrder']);
 Route::get('/payments/options', [PaymentOptionPublicController::class, 'index']);
+Route::get('/settings', [PublicSystemSettingController::class, 'index']);
 // Callback webhooks (no auth)
 Route::post('/payments/mpesa/callback', [PaymentController::class, 'mpesaCallback']);
 Route::post('/payments/airtel/callback', [PaymentController::class, 'airtelCallback']);
@@ -42,11 +47,13 @@ Route::post('/payments/airtel/callback', [PaymentController::class, 'airtelCallb
 // Auth (public)
 Route::post('/auth/register', [AuthController::class, 'register']);
 Route::post('/auth/login', [AuthController::class, 'login'])->name('login');
-Route::get('/user/me', [AuthController::class, 'me']); // alias for frontend expectation
 
 // Protected routes (apply sanctum middleware after installing Sanctum)
 Route::middleware('auth:sanctum')->group(function () {
     Route::get('/auth/me', [AuthController::class, 'me']);
+    Route::get('/user/me', [AuthController::class, 'me']); // alias for frontend expectation
+    Route::get('/user/preferences', [UserPreferenceController::class, 'show']);
+    Route::put('/user/preferences', [UserPreferenceController::class, 'update']);
     Route::post('/auth/logout', [AuthController::class, 'logout']);
     // Product image management (non-admin alias paths for existing frontend calls)
     Route::get('/products/{product}/images', [\App\Http\Controllers\Admin\ProductImageController::class, 'index']);
@@ -68,6 +75,10 @@ Route::middleware(['auth:sanctum','role:ADMIN'])->prefix('admin')->group(functio
     Route::get('/analytics/aov', [AnalyticsExtraController::class, 'aov']);
     Route::get('/analytics/unified', [AnalyticsExtraController::class, 'unified']);
     Route::get('/analytics/advanced', [AnalyticsExtraController::class, 'advanced']);
+    Route::get('/users', [UserAdminController::class, 'index']);
+    Route::post('/users/{user}/activate', [UserAdminController::class, 'activate']);
+    Route::post('/users/{user}/deactivate', [UserAdminController::class, 'deactivate']);
+    Route::get('/users/{user}/orders', [UserAdminController::class, 'orders']);
     Route::get('/products', [ProductAdminController::class, 'index']);
     Route::post('/products', [ProductAdminController::class, 'store']);
     Route::put('/products/{product}', [ProductAdminController::class, 'update']);
@@ -90,6 +101,8 @@ Route::middleware(['auth:sanctum','role:ADMIN'])->prefix('admin')->group(functio
     Route::post('/payments/options', [PaymentOptionAdminController::class, 'store']);
     Route::put('/payments/options/{paymentOption}', [PaymentOptionAdminController::class, 'update']);
     Route::delete('/payments/options/{paymentOption}', [PaymentOptionAdminController::class, 'destroy']);
+    Route::get('/system-settings', [AdminSystemSettingController::class, 'index']);
+    Route::post('/system-settings', [AdminSystemSettingController::class, 'upsert']);
     // Category mutations (restricted)
     // Read endpoints for admin UI (paged + search)
     Route::get('/categories', [CategoryAdminController::class, 'index']);

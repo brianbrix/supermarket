@@ -15,6 +15,8 @@ class OrderItemResource extends JsonResource
             'unitPriceGross' => (float)$this->unit_price_gross,
             'unitPriceNet' => (float)$this->unit_price_net,
             'vatAmount' => (float)$this->vat_amount,
+            'createdAt' => $this->created_at?->toIso8601String(),
+            'updatedAt' => $this->updated_at?->toIso8601String(),
             'product' => new ProductResource($this->whenLoaded('product'))
         ];
     }

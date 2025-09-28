@@ -14,6 +14,11 @@ class OrderItem extends Model
         'order_id','product_id','quantity','unit_price_gross','unit_price_net','vat_amount'
     ];
 
+    protected $casts = [
+        'created_at' => 'datetime',
+        'updated_at' => 'datetime',
+    ];
+
     public function order() {
         return $this->belongsTo(Order::class);
     }

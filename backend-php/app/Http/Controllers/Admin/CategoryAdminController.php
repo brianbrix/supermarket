@@ -29,6 +29,8 @@ class CategoryAdminController extends Controller
                 'name' => $c->name,
                 'description' => $c->description,
                 'productCount' => $c->products_count,
+                'createdAt' => $c->created_at?->toIso8601String(),
+                'updatedAt' => $c->updated_at?->toIso8601String(),
             ];
         }, $paginator->items());
 
@@ -73,6 +75,8 @@ class CategoryAdminController extends Controller
                 'name' => $c->name,
                 'description' => $c->description,
                 'productCount' => $c->products_count,
+                'createdAt' => $c->created_at?->toIso8601String(),
+                'updatedAt' => $c->updated_at?->toIso8601String(),
             ];
         }, $paginator->items());
 

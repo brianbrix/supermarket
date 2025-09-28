@@ -4,7 +4,7 @@ import { nameRules, phoneRules, addressRules } from '../utils/validation.js';
 import { Link, useNavigate } from 'react-router-dom';
 import { useCart } from '../context/CartContext.jsx';
 import { useToast } from '../context/ToastContext.jsx';
-import { formatKES } from '../utils/currency.js';
+import { useCurrencyFormatter } from '../context/SettingsContext.jsx';
 import QRCode from 'qrcode';
 import pdfMake from 'pdfmake/build/pdfmake';
 import pdfFonts from 'pdfmake/build/vfs_fonts';
@@ -27,12 +27,14 @@ function buildCartSignature(list) {
 }
 
 export default function Checkout() {
-  const { user: authUser } = useAuth();
+  const { user: authUser, isAuthenticated, preferences } = useAuth();
   const guestSessionId = ensureGuestSessionId();
   const { items, total, clearCart, backupCart, restoreCart, clearCartBackup, hasCartBackup } = useCart();
   const VAT_RATE = 0.16; // 16% VAT (prices assumed VAT-inclusive)
   const { push } = useToast();
   const navigate = useNavigate();
+  const formatCurrency = useCurrencyFormatter();
+  const formatKES = formatCurrency; // backward-compatible alias for existing helpers
 
   const persisted = (() => {
     let raw = {};
@@ -51,7 +53,10 @@ export default function Checkout() {
       try { sessionStorage.removeItem('checkout'); } catch {}
       return {};
     }
-    return raw || {};
+    return {
+      ...raw,
+      selectedAddressId: raw?.selectedAddressId ?? null,
+    };
   })();
   // react-hook-form integration for step 1 (customer details)
   const defaultValues = {
@@ -67,6 +72,8 @@ export default function Checkout() {
   const form = watch();
   const [submitted, setSubmitted] = useState(persisted.submitted || false);
   const [orderSnapshot, setOrderSnapshot] = useState(() => persisted.orderSnapshot || null);
+  const displayOrderRef = orderSnapshot?.orderNumber ?? orderSnapshot?.orderRef ?? orderRef;
+  const fileSafeOrderRef = (displayOrderRef || orderRef || 'order').toString().replace(/[^A-Za-z0-9_-]+/g, '-');
   const [step, setStep] = useState(persisted.step || 1); // 1: details, 2: payment, 3: confirm
   // removed manual errors / touched state (handled by react-hook-form)
   const [payMethod, setPayMethod] = useState(persisted.payMethod || 'mobile-money');
@@ -74,6 +81,8 @@ export default function Checkout() {
   const [cashSubmitting, setCashSubmitting] = useState(false);
   const mm = useMobileMoneyPayment();
   const orderRef = useState(() => persisted.orderRef || generateOrderRef())[0];
+  const [selectedAddressId, setSelectedAddressId] = useState(persisted.selectedAddressId || null);
+  const savedAddresses = Array.isArray(preferences?.addresses) ? preferences.addresses : [];
 
   const [paymentOptions, setPaymentOptions] = useState([]);
   const [modalOpen, setModalOpen] = useState(false);
@@ -217,28 +226,69 @@ export default function Checkout() {
   }
 
   function persist(partial) {
+    const nextSnapshot = partial?.orderSnapshot ?? orderSnapshot;
+    const resolvedOrderRef = partial?.orderRef
+      ?? nextSnapshot?.orderNumber
+      ?? nextSnapshot?.orderRef
+      ?? orderRef;
     const data = {
       form,
       step,
       submitted,
       payMethod,
-      orderRef,
-      orderSnapshot,
+      orderRef: resolvedOrderRef,
+      orderSnapshot: nextSnapshot,
+      selectedAddressId,
       ...partial
     };
     try { sessionStorage.setItem('checkout', JSON.stringify(data)); } catch {}
   }
 
   // persist whenever core state changes
-  useEffect(() => { persist({}); }, [form, step, submitted, payMethod]);
+  useEffect(() => { persist({}); }, [form, step, submitted, payMethod, selectedAddressId]);
+
+  useEffect(() => {
+    if (!selectedAddressId) return;
+    const match = savedAddresses.find(address => address.id === selectedAddressId);
+    if (!match) {
+      setSelectedAddressId(null);
+      return;
+    }
+    if (form.delivery === 'delivery' && form.address !== match.details) {
+      setValue('address', match.details, { shouldDirty: false, shouldTouch: false });
+    }
+  }, [selectedAddressId, savedAddresses, form.delivery, form.address, setValue]);
+
+  useEffect(() => {
+    if (!selectedAddressId) return;
+    const match = savedAddresses.find(address => address.id === selectedAddressId);
+    if (!match) return;
+    if (form.address === match.details) return;
+    const normalizedInput = (form.address || '').trim();
+    const normalizedSaved = (match.details || '').trim();
+    if (normalizedInput === normalizedSaved) return;
+    setSelectedAddressId(null);
+  }, [form.address, selectedAddressId, savedAddresses]);
+
+  useEffect(() => {
+    if (form.delivery !== 'delivery') return;
+    if (selectedAddressId) return;
+    const match = savedAddresses.find(address => (address.details || '').trim() === (form.address || '').trim());
+    if (match) {
+      setSelectedAddressId(match.id);
+    }
+  }, [form.delivery, form.address, savedAddresses, selectedAddressId]);
 
   // address requirement depends on delivery method; trigger validation when delivery changes
   useEffect(() => {
     if (form.delivery !== 'delivery') {
       setValue('address', '');
+      if (selectedAddressId) {
+        setSelectedAddressId(null);
+      }
     }
     trigger('address');
-  }, [form.delivery, setValue, trigger]);
+  }, [form.delivery, setValue, trigger, selectedAddressId]);
 
   // react-hook-form handles validation; trigger() used before advancing
 
@@ -307,6 +357,7 @@ export default function Checkout() {
         customerPhone: form.phone,
         items: items.map(i => ({ productId: i.id, quantity: i.qty }))
       });
+      const backendOrderNumber = created?.orderNumber ?? created?.order_number ?? null;
       // Create a snapshot of the current cart for display and receipts before clearing
       const cartSig = buildCartSignature(items);
       const backendSubtotal = parseMoney(created?.totalNet ?? created?.subtotal ?? created?.netTotal);
@@ -350,6 +401,8 @@ export default function Checkout() {
         total: resolvedTotal,
         ts: Date.now(),
         backendOrderId: created.id,
+        orderNumber: backendOrderNumber ?? orderRef,
+        orderRef: backendOrderNumber ?? orderRef,
         cartSignature: cartSig,
         userId: snapshotUserId,
         paymentStatus: created?.latestPayment?.status ?? created?.paymentStatus ?? null,
@@ -411,7 +464,9 @@ export default function Checkout() {
           cartSignature: buildCartSignature(items),
           userId: authUser?.id ?? null,
           paymentStatus: mm.payment?.status ?? 'SUCCESS',
-          paymentMethod: mm.payment?.method ?? null
+          paymentMethod: mm.payment?.method ?? null,
+          orderNumber: displayOrderRef,
+          orderRef: displayOrderRef
         };
         setOrderSnapshot(snapshot);
       } else {
@@ -479,10 +534,12 @@ export default function Checkout() {
             : fallbackProvider === 'AIRTEL'
               ? 'AIRTEL_STK_PUSH'
               : null);
+        const snapshotOrderRef = snapshot.orderNumber ?? snapshot.orderRef ?? displayOrderRef;
         const guestOrder = {
           id: snapshot.backendOrderId ?? orderSnapshot?.backendOrderId ?? `guest-${orderRef}`,
           sessionId: guestSessionId,
-          orderRef,
+          orderRef: snapshotOrderRef,
+          orderNumber: snapshot.orderNumber ?? null,
           createdAt: isoCreatedAt,
           customerName: form.name,
           customerPhone: form.phone,
@@ -543,7 +600,7 @@ export default function Checkout() {
   function exportSummary() {
     const snap = orderSnapshot || { items, total };
     const lines = [
-      `Order: ${orderRef}`,
+      `Order: ${displayOrderRef}`,
       `Name: ${form.name}`,
       `Phone: ${form.phone}`,
       `Delivery: ${form.delivery}`,
@@ -555,8 +612,8 @@ export default function Checkout() {
     ].join('\n');
     const blob = new Blob([lines], { type: 'text/plain' });
     const a = document.createElement('a');
-    a.href = URL.createObjectURL(blob);
-    a.download = `order-${orderRef}.txt`;
+  a.href = URL.createObjectURL(blob);
+  a.download = `order-${fileSafeOrderRef}.txt`;
     a.click();
     URL.revokeObjectURL(a.href);
     push('Summary downloaded');
@@ -575,7 +632,7 @@ export default function Checkout() {
       // Generate QR code (data URL) with minimal payload
       let qrDataUrl = '';
       try {
-        qrDataUrl = await QRCode.toDataURL(JSON.stringify({ orderRef, total: snap.total }));
+        qrDataUrl = await QRCode.toDataURL(JSON.stringify({ orderRef: displayOrderRef, total: snap.total }));
       } catch {}
 
       const docDefinition = {
@@ -587,7 +644,7 @@ export default function Checkout() {
           {
             columns: [
               [
-                { text: `Order: ${orderRef}`, style: 'meta' },
+                { text: `Order: ${displayOrderRef}`, style: 'meta' },
                 paymentRef ? { text: `Payment: ${paymentRef}`, style: 'meta' } : null,
                 { text: `Date: ${new Date(snap.ts || Date.now()).toLocaleString()}`, style: 'meta' },
                 { text: `Method: ${resolvedPaymentLabel}`, style: 'meta' }
@@ -658,7 +715,7 @@ export default function Checkout() {
         defaultStyle: { fontSize: 9 }
       };
 
-      pdfMake.createPdf(docDefinition).download(`receipt-${orderRef}.pdf`);
+  pdfMake.createPdf(docDefinition).download(`receipt-${fileSafeOrderRef}.pdf`);
       push('Receipt PDF downloaded');
     } catch (err) {
       console.error('PDF export failed', err);
@@ -675,7 +732,7 @@ export default function Checkout() {
     }
     const pretty = [
   `${BRAND_RECEIPT_TITLE} Receipt`,
-      `Order: ${orderRef}`,
+    `Order: ${displayOrderRef}`,
       paymentRef ? `Payment Ref: ${paymentRef}` : '',
       `Date: ${new Date(snap.ts || Date.now()).toLocaleString()}`,
       `Customer: ${form.name}`,
@@ -686,7 +743,7 @@ export default function Checkout() {
     ].filter(Boolean);
     (Array.isArray(snap.items) ? snap.items : items).forEach(i => pretty.push(` - ${i.name} x${i.qty} @ ${formatKES(i.price)} = ${formatKES(i.price*i.qty)}`));
   pretty.push('', `Net (Excl VAT): ${formatKES(snap.subtotal)}`, `VAT (16%): ${formatKES(snap.vat)}`, `TOTAL (Incl): ${formatKES(snap.total)}`, '', 'Asante!');
-    const res = await sendEmailMock({ orderRef, total: snap.total, phone: form.phone, body: pretty.join('\n') });
+  const res = await sendEmailMock({ orderRef: displayOrderRef, total: snap.total, phone: form.phone, body: pretty.join('\n') });
     if (res.sent) push('Email sent (mock)');
   }
 
@@ -990,7 +1047,10 @@ export default function Checkout() {
             <div className="d-flex flex-column flex-md-row justify-content-between mb-3 gap-2">
               <div>
                 <h2 className="h6 mb-1">Receipt</h2>
-                <p className="small text-muted mb-0">Ref: <strong>{orderRef}</strong></p>
+                <p className="small text-muted mb-0">Ref: <strong>{displayOrderRef}</strong></p>
+                {orderSnapshot?.backendOrderId && (
+                  <p className="small text-muted mb-0">Order ID: #{orderSnapshot.backendOrderId}</p>
+                )}
                 {paymentRef && (
                   <p className="small text-muted mb-0">
                     Payment: <strong>{paymentRef}</strong> ({resolvedPaymentLabel})
@@ -1056,6 +1116,15 @@ export default function Checkout() {
   return (
   <section className="container py-3 px-3 px-sm-4">
       <h1 id="checkout-heading" tabIndex="-1" className="h3 mb-3">Checkout</h1>
+      {!isAuthenticated && (
+        <div className="alert alert-info d-flex flex-column flex-md-row align-items-md-center gap-2" role="status">
+          <div><strong>Have an account?</strong> Log in to reuse saved delivery addresses and keep track of every order.</div>
+          <div className="d-flex gap-2 ms-md-auto">
+            <Link to="/login" className="btn btn-sm btn-success">Log in</Link>
+            <Link to="/register" className="btn btn-sm btn-outline-success">Sign up</Link>
+          </div>
+        </div>
+      )}
       <ProgressSteps current={step} />
       <div className="row g-4">
         <div className="col-12 col-lg-7">
@@ -1078,6 +1147,49 @@ export default function Checkout() {
                   <option value="delivery">Home Delivery</option>
                 </select>
               </div>
+              {isAuthenticated && form.delivery === 'delivery' && savedAddresses.length > 0 && (
+                <div className="mb-3">
+                  <div className="card border-0 shadow-sm">
+                    <div className="card-body d-flex flex-column gap-2">
+                      <div className="d-flex flex-wrap justify-content-between align-items-center gap-2">
+                        <p className="small text-muted mb-0">Use a saved address</p>
+                        <Link to="/account/settings" className="btn btn-link btn-sm p-0 align-self-start">Manage addresses</Link>
+                      </div>
+                      {savedAddresses.map(address => {
+                        const selected = selectedAddressId === address.id;
+                        return (
+                          <label
+                            key={address.id}
+                            className={`border rounded p-3 w-100 ${selected ? 'border-success bg-body-tertiary' : ''}`}
+                            style={{ cursor: 'pointer' }}
+                          >
+                            <div className="d-flex align-items-start gap-3">
+                              <input
+                                type="radio"
+                                className="form-check-input mt-1"
+                                name="saved-address"
+                                checked={selected}
+                                onChange={() => {
+                                  setSelectedAddressId(address.id);
+                                  if (form.delivery !== 'delivery') {
+                                    setValue('delivery', 'delivery', { shouldDirty: true, shouldTouch: true });
+                                  }
+                                  setValue('address', address.details, { shouldDirty: false, shouldTouch: true });
+                                  trigger('address');
+                                }}
+                              />
+                              <div className="flex-grow-1">
+                                <div className="fw-semibold">{address.label || 'Saved address'}</div>
+                                <p className="small mb-0 text-muted">{address.details}</p>
+                              </div>
+                            </div>
+                          </label>
+                        );
+                      })}
+                    </div>
+                  </div>
+                </div>
+              )}
               {form.delivery === 'delivery' && (
                 <div className="mb-3">
                   <label className="form-label">Address</label>

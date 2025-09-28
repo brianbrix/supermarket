@@ -1,7 +1,8 @@
-import { createContext, useContext, useEffect, useState, useCallback } from 'react';
+import { createContext, useContext, useEffect, useState, useCallback, useRef } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { useToast } from './ToastContext.jsx';
 import { api } from '../services/api.js';
+import { useTheme } from './ThemeContext.jsx';
 
 const AuthContext = createContext();
 
@@ -16,8 +17,12 @@ export function AuthProvider({ children }) {
   return null;
     } catch { return null; }
   });
+  const [preferences, setPreferences] = useState(null);
+  const [preferencesLoading, setPreferencesLoading] = useState(false);
   const navigate = useNavigate();
   const { push } = useToast();
+  const { setTheme } = useTheme();
+  const appliedThemePreferenceRef = useRef(null);
 
   useEffect(() => {
     if (token) localStorage.setItem('auth_token', token); else localStorage.removeItem('auth_token');
@@ -57,7 +62,7 @@ export function AuthProvider({ children }) {
   }, [navigate, push]);
 
   const logout = useCallback(() => {
-    setToken(null); setUser(null); navigate('/login');
+    setToken(null); setUser(null); setPreferences(null); navigate('/login');
   }, [navigate]);
 
   const changePassword = useCallback(async (currentPassword, newPassword) => {
@@ -79,6 +84,45 @@ export function AuthProvider({ children }) {
     } catch { /* ignore */ }
   }, [token]);
 
+  const refreshPreferences = useCallback(async () => {
+    if (!token) {
+      setPreferences(null);
+      return null;
+    }
+    setPreferencesLoading(true);
+    try {
+      const data = await api.user.preferences.get();
+      setPreferences(data);
+      return data;
+    } catch (err) {
+      return null;
+    } finally {
+      setPreferencesLoading(false);
+    }
+  }, [token]);
+
+  const updatePreferences = useCallback(async (payload) => {
+    if (!token) throw new Error('Not authenticated');
+    const data = await api.user.preferences.update(payload);
+    setPreferences(data);
+    return data;
+  }, [token]);
+
+  useEffect(() => {
+    if (!token) {
+      setPreferences(null);
+      return;
+    }
+    refreshPreferences();
+  }, [token, refreshPreferences]);
+
+  useEffect(() => {
+    if (!preferences?.themePreference) return;
+    if (appliedThemePreferenceRef.current === preferences.themePreference) return;
+    appliedThemePreferenceRef.current = preferences.themePreference;
+    setTheme(preferences.themePreference, 'user');
+  }, [preferences?.themePreference, setTheme]);
+
   const value = {
     token,
     user,
@@ -89,7 +133,11 @@ export function AuthProvider({ children }) {
     isAdmin: !!user && user.role && user.role !== 'CUSTOMER',
     isCustomer: !!user && user.role === 'CUSTOMER',
     changePassword,
-    refreshProfile
+    refreshProfile,
+    preferences,
+    preferencesLoading,
+    refreshPreferences,
+    updatePreferences
   };
   return <AuthContext.Provider value={value}>{children}</AuthContext.Provider>;
 }

@@ -1,12 +1,12 @@
 import { useParams, useNavigate, Link } from 'react-router-dom';
 // import { products } from '../data/products.js'; // replaced by API
 import { api, mapProductResponse } from '../services/api.js';
-import { formatKES } from '../utils/currency.js';
 import { useCart } from '../context/CartContext.jsx';
 import { useToast } from '../context/ToastContext.jsx';
 import { useState, useMemo, useEffect } from 'react';
 import QuantityStepper from '../components/QuantityStepper.jsx';
 import ImageWithFallback from '../components/ImageWithFallback.jsx';
+import { useCurrencyFormatter } from '../context/SettingsContext.jsx';
 
 export default function ProductDetail() {
   const { id } = useParams();
@@ -24,6 +24,7 @@ export default function ProductDetail() {
   const { addItem } = useCart();
   const { push } = useToast();
   const [qty, setQty] = useState(1);
+  const formatCurrency = useCurrencyFormatter();
   const subtotal = useMemo(()=> qty * (product?.price || 0), [qty, product]);
 
   if (loading) return <section className="container py-4"><p>Loading product...</p></section>;
@@ -44,9 +45,9 @@ export default function ProductDetail() {
           <li className="breadcrumb-item active" aria-current="page">{product.name}</li>
         </ol>
       </nav>
-      <div className="row g-4">
+      <div className="row g-4 align-items-start">
         <div className="col-12 col-md-5">
-          <div className="border rounded p-3 bg-body">
+          <div className="border rounded p-3 bg-body h-100">
             {product.images && product.images.length > 1 ? <ImageCarousel product={product} /> : (
               <div className="text-center">
                 <ImageWithFallback
@@ -63,16 +64,25 @@ export default function ProductDetail() {
         <div className="col-12 col-md-7">
           <h1 className="h3 mb-2">{product.name}</h1>
           <p className="text-muted small mb-3">{product.description}</p>
-          <p className="fs-5 fw-semibold">{formatKES(product.price)} <span className="text-secondary">/{product.unit}</span></p>
-          <div className="d-flex gap-3 flex-wrap align-items-end">
-            <div>
+          <div className="d-flex flex-wrap gap-2 align-items-center mb-2">
+            <p className="fs-5 fw-semibold mb-0">{formatCurrency(product.price)}{product.unit ? <span className="text-secondary">/{product.unit}</span> : null}</p>
+            {product.stock !== undefined && (
+              <span className={`badge ${product.stock > 0 ? 'text-bg-success' : 'text-bg-danger'}`}>
+                {product.stock > 0 ? `${product.stock} in stock` : 'Out of stock'}
+              </span>
+            )}
+          </div>
+          <div className="d-flex flex-column flex-sm-row gap-3 align-items-stretch align-items-sm-end">
+            <div className="flex-grow-1">
               <label className="form-label small mb-1">Quantity</label>
               <QuantityStepper value={qty} onChange={setQty} ariaLabel="Quantity" />
-              <div className="form-text">Subtotal: {formatKES(subtotal)}</div>
+              <div className="form-text">Subtotal: {formatCurrency(subtotal)}</div>
             </div>
-            <button className="btn btn-success" onClick={addAndGo}>Add to Cart</button>
-            <button className="btn btn-outline-primary" onClick={()=>navigate('/cart')}>Go to Cart</button>
-            <button className="btn btn-outline-secondary" onClick={()=>navigate(-1)}>Back</button>
+            <div className="d-flex flex-column gap-2 flex-sm-row flex-sm-wrap">
+              <button className="btn btn-success w-100" onClick={addAndGo} disabled={product.stock === 0}>Add to Cart</button>
+              <button className="btn btn-outline-primary w-100" onClick={()=>navigate('/cart')}>Go to Cart</button>
+              <button className="btn btn-outline-secondary w-100" onClick={()=>navigate(-1)}>Back</button>
+            </div>
           </div>
         </div>
       </div>

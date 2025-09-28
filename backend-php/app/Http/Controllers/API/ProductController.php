@@ -68,6 +68,17 @@ class ProductController extends Controller
         return response()->json(['min' => $min, 'max' => $max]);
     }
 
+    public function show(Product $product)
+    {
+        $product->load([
+            'category',
+            'images' => function ($query) {
+                $query->orderBy('position')->orderBy('id');
+            }
+        ]);
+        return new ProductResource($product);
+    }
+
     private function pageResponse($paginator, $data)
     {
         return response()->json([

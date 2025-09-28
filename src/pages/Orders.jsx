@@ -1,13 +1,16 @@
 import { useEffect, useState, useRef, useCallback } from 'react';
+import { Link } from 'react-router-dom';
 import { useAuth } from '../context/AuthContext.jsx';
 import { api } from '../services/api.js';
-import { formatKES } from '../utils/currency.js';
+import { useCurrencyFormatter } from '../context/SettingsContext.jsx';
 import PaginationBar from '../components/PaginationBar.jsx';
 import { ensureGuestSessionId, readGuestOrders } from '../utils/guestOrders.js';
 
 const PAYMENT_TIMEOUT_MS = 3 * 60 * 1000;
 
 export default function Orders(){
+  const formatCurrency = useCurrencyFormatter();
+  const formatKES = formatCurrency;
   const [orders, setOrders] = useState([]);
   const [meta, setMeta] = useState({ page:0, size:10, totalElements:0, totalPages:0, first:true, last:true });
   const [page, setPage] = useState(0);
@@ -47,10 +50,14 @@ export default function Orders(){
     const vatAmount = Number(snapshot?.vat ?? o.vatAmount ?? o.vat_amount ?? 0);
   const total = Number(snapshot?.total ?? o.totalGross ?? o.total_gross ?? fallbackTotal);
   const createdAtMs = o.createdAt ? new Date(o.createdAt).getTime() : (snapshot?.ts ?? Date.now());
+    const backendRef = o.orderNumber ?? o.order_number ?? o.reference ?? null;
     const guestRef = snapshot?.orderRef || snapshot?.id || (snapshot?.ts ? `guest-${snapshot.ts}` : `guest-${createdAtMs}`);
+    const displayRef = backendRef ?? o.orderRef ?? (o.id != null ? `#${o.id}` : guestRef);
     return {
-      id: o.id ?? o.orderRef ?? guestRef,
-      orderRef: o.orderRef ?? o.id ?? guestRef ?? 'guest-order',
+      id: o.id ?? backendRef ?? guestRef,
+      orderId: o.id ?? null,
+      orderNumber: backendRef ?? displayRef,
+      orderRef: displayRef ?? 'guest-order',
       createdAt: createdAtMs,
       paymentStatus,
       paymentMethod: paymentProgress?.method || o.paymentMethod || snapshot?.paymentMethod || o.guestPaymentMethod || null,
@@ -204,10 +211,35 @@ export default function Orders(){
     return parts.length ? parts.join(' • ') : null;
   }
 
-  if (!orders.length) return <section className="container py-3"><h1 className="h5 mb-3">Order History</h1><p className="text-muted">No previous orders yet.{!isAuthenticated && ' (Guest orders are stored locally during this session)'}</p></section>;
+  if (!orders.length) {
+    return (
+      <section className="container py-3">
+        <h1 className="h5 mb-3">Order History</h1>
+        {!isAuthenticated && (
+          <div className="alert alert-info d-flex flex-column flex-md-row align-items-md-center gap-2" role="status">
+            <div><strong>Create an account</strong> to sync your orders across devices and store delivery addresses for faster checkout.</div>
+            <div className="d-flex gap-2 ms-md-auto">
+              <Link to="/login" className="btn btn-sm btn-success">Log in</Link>
+              <Link to="/register" className="btn btn-sm btn-outline-success">Sign up</Link>
+            </div>
+          </div>
+        )}
+        <p className="text-muted">No previous orders yet.{!isAuthenticated && ' (Guest orders are stored locally during this session)'}</p>
+      </section>
+    );
+  }
   return (
     <section className="container py-3">
       <h1 className="h5 mb-3">Order History</h1>
+      {!isAuthenticated && (
+        <div className="alert alert-info d-flex flex-column flex-md-row align-items-md-center gap-2" role="status">
+          <div>Sign in to track orders across devices and save delivery addresses for one-tap checkout.</div>
+          <div className="d-flex gap-2 ms-md-auto">
+            <Link to="/login" className="btn btn-sm btn-success">Log in</Link>
+            <Link to="/register" className="btn btn-sm btn-outline-success">Create account</Link>
+          </div>
+        </div>
+      )}
       <div className="table-responsive">
         <table className="table table-sm align-middle">
           <thead>
@@ -218,7 +250,10 @@ export default function Orders(){
           <tbody>
             {orders.map(o => (
               <tr key={o.orderRef} className={selected?.orderRef===o.orderRef? 'table-active':''}>
-                <td>{o.orderRef}</td>
+                <td>
+                  <div className="fw-semibold">{o.orderRef}</div>
+                  {o.orderId != null && <div className="text-muted small">Order ID #{o.orderId}</div>}
+                </td>
                 <td>{new Date(o.createdAt).toLocaleString()}</td>
                 <td>{totalItems(o)}</td>
                 <td>
@@ -255,11 +290,12 @@ export default function Orders(){
                 <button ref={closeBtnRef} type="button" className="btn-close" aria-label="Close order details" onClick={close}></button>
               </div>
               <div className="modal-body">
+                {selected.orderId != null && <p className="small mb-1"><strong>Order ID:</strong> #{selected.orderId}</p>}
                 <p className="small mb-1"><strong>Date:</strong> {new Date(selected.createdAt).toLocaleString()}</p>
                 <p className="small mb-1"><strong>Total:</strong> {formatKES(selected.snapshot.total)}</p>
                 <p className="small mb-1"><strong>Payment Status:</strong> {statusBadge(selected)} {selected.paymentMethod && <span className="text-muted ms-2">{selected.paymentMethod}</span>}</p>
                 {selected.paymentProgress && (
-                  <div className="border rounded small p-2 mb-2 bg-light">
+                  <div className="border rounded small p-2 mb-2 bg-body-tertiary">
                     <p className="mb-1 fw-semibold">Payment progress</p>
                     <ul className="list-unstyled mb-1">
                       {selected.paymentProgress.provider && <li className="mb-0">Provider: <strong>{selected.paymentProgress.provider}</strong></li>}

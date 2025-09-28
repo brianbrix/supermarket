@@ -1,10 +1,12 @@
-import { formatKES } from '../utils/currency.js';
+import { useCurrencyFormatter } from '../context/SettingsContext.jsx';
 import { useCart } from '../context/CartContext.jsx';
 import { useToast } from '../context/ToastContext.jsx';
 import { useLocation, useNavigate, Link } from 'react-router-dom';
 import ImageWithFallback from './ImageWithFallback.jsx';
 
 export default function ProductCard({ product }) {
+  const formatCurrency = useCurrencyFormatter();
+  const formatKES = formatCurrency;
   const { addItem } = useCart();
   const { push } = useToast();
   const location = useLocation();
@@ -27,7 +29,7 @@ export default function ProductCard({ product }) {
     }
   }
   return (
-    <div className="card h-100 position-relative">
+    <div className="product-card card h-100 position-relative">
       {product.stock === 0 && <span className="badge text-bg-danger position-absolute top-0 end-0 m-2">Out</span>}
       {product.stock > 0 && product.stock <= 3 && <span className="badge text-bg-warning position-absolute top-0 end-0 m-2">{product.stock} left</span>}
       <Link to={`/product/${product.id}`} className="text-decoration-none text-reset">
@@ -36,7 +38,7 @@ export default function ProductCard({ product }) {
             <ImageWithFallback src={product.image} alt={product.name} />
           </div>
           <h3 className="h6 mb-1">{product.name}</h3>
-          <p className="text-muted small mb-2">{product.description}</p>
+          <p className="text-muted small mb-2 product-card__description">{product.description}</p>
         </div>
       </Link>
       <div className="px-3 pb-3 mt-auto">

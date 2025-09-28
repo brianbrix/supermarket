@@ -6,6 +6,7 @@ use App\Models\Payment;
 use Illuminate\Database\Eloquent\Casts\Attribute;
 use Illuminate\Database\Eloquent\Factories\HasFactory;
 use Illuminate\Database\Eloquent\Model;
+use Illuminate\Support\Str;
 use Laravel\Sanctum\HasApiTokens;
 
 class Order extends Model
@@ -13,7 +14,7 @@ class Order extends Model
     use HasApiTokens, HasFactory;
 
     protected $fillable = [
-        'customer_name','customer_phone','status','total_gross','total_net','vat_amount','user_id','thumbnail_url'
+        'customer_name','customer_phone','status','total_gross','total_net','vat_amount','user_id','thumbnail_url','order_number'
     ];
 
     protected $appends = ['payment_status','payment_method'];
@@ -22,6 +23,15 @@ class Order extends Model
         'created_at' => 'datetime',
         'updated_at' => 'datetime'
     ];
+
+    protected static function booted(): void
+    {
+        static::creating(function (self $order) {
+            if (empty($order->order_number)) {
+                $order->order_number = static::generateOrderNumber();
+            }
+        });
+    }
 
     public function items() {
         return $this->hasMany(OrderItem::class);
@@ -47,5 +57,15 @@ class Order extends Model
     protected function paymentMethod(): Attribute
     {
         return Attribute::get(fn () => $this->latestPayment?->method);
+    }
+
+    public static function generateOrderNumber(): string
+    {
+        $prefix = now()->format('Ymd');
+        do {
+            $candidate = 'ORD-' . $prefix . '-' . strtoupper(Str::random(6));
+        } while (static::where('order_number', $candidate)->exists());
+
+        return $candidate;
     }
 }

@@ -1,13 +1,14 @@
 import { useCart } from '../context/CartContext.jsx';
 import { useLocation, Link } from 'react-router-dom';
-import { formatCurrency } from '../utils/currency.js';
 import { useEffect, useState } from 'react';
+import { useCurrencyFormatter } from '../context/SettingsContext.jsx';
 
 // Sticky bar visible on small screens showing subtotal and quick actions
 export default function MobileCartBar(){
   const { total, count } = useCart();
   const location = useLocation();
   const [isMobile, setIsMobile] = useState(window.innerWidth < 576);
+  const formatCurrency = useCurrencyFormatter();
 
   useEffect(()=>{
     function handleResize(){ setIsMobile(window.innerWidth < 576); }

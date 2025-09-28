@@ -2,7 +2,9 @@
 // In a real application, these would call HTTP endpoints.
 
 export function generateOrderRef() {
-  return 'KS' + Math.random().toString(36).slice(2,8).toUpperCase();
+  const now = new Date();
+  const ymd = `${now.getFullYear()}${String(now.getMonth()+1).padStart(2,'0')}${String(now.getDate()).padStart(2,'0')}`;
+  return `ORD-${ymd}-${Math.random().toString(36).slice(2,8).toUpperCase()}`;
 }
 
 export function initiatePayment({ method, amount }) {

@@ -23,9 +23,16 @@ class User extends Authenticatable
         'last_login' => 'datetime',
         'active' => 'boolean',
         'role' => Role::class,
+        'created_at' => 'datetime',
+        'updated_at' => 'datetime',
     ];
 
     public function orders() { return $this->hasMany(Order::class); }
+
+    public function preferences()
+    {
+        return $this->hasOne(UserPreference::class);
+    }
 
     public function isAdmin(): bool
     {

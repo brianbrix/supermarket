@@ -45,6 +45,9 @@ async function request(path, options = {}) {
 }
 
 export const api = {
+  settings: {
+    get: () => request('/settings')
+  },
   auth: {
     login: (payload) => request('/auth/login', { method: 'POST', body: JSON.stringify(payload) }),
     register: (payload) => request('/auth/register', { method: 'POST', body: JSON.stringify(payload) }),
@@ -64,7 +67,7 @@ export const api = {
   },
   products: {
     list: (page=0,size=10) => request(`/products?page=${page}&size=${size}`),
-    get: (id) => request(`/products/${id}`),
+    get: (id) => request(`/products/${id}`).then(res => res?.data ?? res),
     priceRange: (categoryId) => {
       const qs = categoryId ? `?categoryId=${encodeURIComponent(categoryId)}` : '';
       return request(`/products/price-range${qs}`);
@@ -103,7 +106,11 @@ export const api = {
     get: (id) => request(`/orders/${id}`)
   },
   user: {
-    orders: (page=0,size=10) => request(`/user/orders?page=${page}&size=${size}`)
+    orders: (page=0,size=10) => request(`/user/orders?page=${page}&size=${size}`),
+    preferences: {
+      get: () => request('/user/preferences'),
+      update: (payload) => request('/user/preferences', { method: 'PUT', body: JSON.stringify(payload) })
+    }
   },
   admin: {
     stats: () => request('/admin/dashboard/stats'),
@@ -139,6 +146,35 @@ export const api = {
         if (to) params.set('to', to);
         const qs = params.toString();
         return request(`/admin/analytics/advanced${qs?`?${qs}`:''}`);
+      }
+    },
+    users: {
+      list: (page = 0, size = 20, filters = {}) => {
+        const params = new URLSearchParams();
+        params.set('page', page);
+        params.set('size', size);
+        const { q, role, active, from, to, sort = 'created_at', direction = 'desc' } = filters;
+        if (q) params.set('q', q);
+        if (role) params.set('role', role);
+        if (active !== undefined && active !== null && active !== '') params.set('active', active);
+        if (from) params.set('from', from);
+        if (to) params.set('to', to);
+        if (sort) params.set('sort', sort);
+        if (direction) params.set('direction', direction);
+        return request(`/admin/users?${params.toString()}`);
+      },
+      activate: (userId) => request(`/admin/users/${userId}/activate`, { method: 'POST' }),
+      deactivate: (userId) => request(`/admin/users/${userId}/deactivate`, { method: 'POST' }),
+      orders: (userId, { page = 0, size = 10, status, from, to, sort = 'created_at', direction = 'desc' } = {}) => {
+        const params = new URLSearchParams();
+        params.set('page', page);
+        params.set('size', size);
+        if (status) params.set('status', status);
+        if (from) params.set('from', from);
+        if (to) params.set('to', to);
+        if (sort) params.set('sort', sort);
+        if (direction) params.set('direction', direction);
+        return request(`/admin/users/${userId}/orders?${params.toString()}`);
       }
     },
     orders: {
@@ -205,6 +241,10 @@ export const api = {
         delete: (id) => request(`/admin/payment-options/${id}`, { method:'DELETE' })
       }
     },
+    systemSettings: {
+      list: () => request('/admin/system-settings'),
+      save: (settings) => request('/admin/system-settings', { method: 'POST', body: JSON.stringify({ settings }) })
+    },
     categories: {
       paged: (page=0,size=10) => request(`/admin/categories?page=${page}&size=${size}`),
       // Flexible signature:
@@ -238,7 +278,21 @@ export const api = {
   }
 };
 
-export function mapProductResponse(p) {
+export function mapProductResponse(raw) {
+  const p = raw?.data ?? raw;
+  if (!p) return {
+    id: null,
+    name: '',
+    price: 0,
+    unit: '',
+    category: '',
+    image: '',
+    images: [],
+    imageObjects: [],
+    description: '',
+    stock: undefined,
+    categoryId: undefined
+  };
   // Prefer structured images (with id/url/position), fallback to legacy list of URLs.
   let imageMeta = Array.isArray(p.images) ? p.images : [];
   if (imageMeta.length === 0) {

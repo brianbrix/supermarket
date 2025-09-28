@@ -1,7 +1,9 @@
 import { useEffect, useState } from 'react';
 import { api } from '../../services/api.js';
 import OrderDetailModal from '../../components/admin/OrderDetailModal.jsx';
+import { mergeOrders, normalizeOrder } from '../../utils/order.js';
 import '../../styles/adminDashboard.scss';
+import { useCurrencyFormatter, useSettings } from '../../context/SettingsContext.jsx';
 
 // Simple palette mapping for order/stat semantics
 const STAT_STYLES = [
@@ -21,11 +23,16 @@ export default function AdminDashboard(){
   const [selectedOrder, setSelectedOrder] = useState(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(null);
+  const [selectedOrderLoading, setSelectedOrderLoading] = useState(false);
+  const formatCurrency = useCurrencyFormatter();
+  const { settings } = useSettings();
+  const currencyLabel = settings?.currency?.symbol || settings?.currency?.code || 'KES';
+  const formatAmount = (value) => formatCurrency(Number(value ?? 0));
 
   useEffect(() => {
     let active = true;
     Promise.all([api.admin.stats(), api.admin.recentOrders(5)])
-      .then(([s,r])=>{ if(!active) return; setStats(s); setRecent(r); setLoading(false); })
+      .then(([s,r])=>{ if(!active) return; setStats(s); setRecent(r.map(normalizeOrder)); setLoading(false); })
       .catch(e=>{ if(!active) return; setError(e.message); setLoading(false); });
     return () => { active = false; };
   }, []);
@@ -50,7 +57,7 @@ export default function AdminDashboard(){
                     <span>{cfg.label}</span>
                   </div>
                   <div className="flex-grow-1 d-flex align-items-end stat-value">
-                    {cfg.key === 'totalRevenue' ? `KES ${Number(stats.totalRevenue || 0).toFixed(2)}` : stats[cfg.key]}
+                    {cfg.key === 'totalRevenue' ? formatAmount(stats.totalRevenue) : stats[cfg.key]}
                   </div>
                 </div>
               </div>
@@ -73,7 +80,7 @@ export default function AdminDashboard(){
                 <th className="fw-normal">ID</th>
                 <th className="fw-normal">Customer</th>
                 <th className="fw-normal">Status</th>
-                <th className="fw-normal text-end">Total (KES)</th>
+                <th className="fw-normal text-end">Total ({currencyLabel})</th>
                 <th className="fw-normal text-center">Items</th>
               </tr>
             </thead>
@@ -82,9 +89,14 @@ export default function AdminDashboard(){
               {recent.map(o => (
                 <tr key={o.id} style={{cursor:'pointer'}} onClick={(e)=>{
                   if (e.target.tagName === 'SELECT' || e.target.closest('select')) return;
-                  setSelectedOrder(o);
+                  openOrder(o);
                 }}>
-                  <td className="small text-muted">#{o.id}</td>
+                  <td className="small text-muted">
+                    <div className="d-flex flex-column">
+                      <span className="fw-semibold">{o.orderNumber ?? `#${o.id}`}</span>
+                      {o.orderNumber && <span className="text-muted">ID #{o.id}</span>}
+                    </div>
+                  </td>
                   <td className="text-truncate" style={{maxWidth:160}}>{o.customerName || '—'}</td>
                   <td style={{minWidth:'170px'}} className="d-flex align-items-center gap-2">
                     <span className={`status-badge ${o.status}`}>{o.status}</span>
@@ -95,24 +107,42 @@ export default function AdminDashboard(){
                         const newStatus = e.target.value;
                         try {
                           const updated = await api.admin.orders.updateStatus(o.id, newStatus);
-                          setRecent(prev => prev.map(r => r.id === o.id ? { ...r, status: updated.status } : r));
-                        } catch (err) {}
+                          setRecent(prev => prev.map(r => r.id === o.id ? mergeOrders(r, updated) : r));
+                          if (selectedOrder?.id === o.id) {
+                            setSelectedOrder(prev => mergeOrders(prev, updated));
+                          }
+                        } catch (err) { setError(err.message); }
                       }}
                     >
                       {ORDER_STATUSES.map(s => <option key={s} value={s}>{s}</option>)}
                     </select>
                   </td>
-                  <td className="text-end fw-semibold">{Number(o.totalGross || o.total || 0).toFixed(2)}</td>
-                  <td className="text-center">{o.items?.length}</td>
+                  <td className="text-end fw-semibold">{formatAmount(o.totalGross ?? o.total ?? 0)}</td>
+                  <td className="text-center">{o.items?.length ?? o.itemsCount ?? 0}</td>
                 </tr>
               ))}
             </tbody>
           </table>
         </div>
       </div>
-      <OrderDetailModal order={selectedOrder} onClose={()=>setSelectedOrder(null)} />
+      <OrderDetailModal order={selectedOrder} loading={selectedOrderLoading} onClose={()=>setSelectedOrder(null)} />
     </div>
   );
+
+  async function openOrder(orderSummary) {
+    if (!orderSummary) return;
+    const normalizedSummary = normalizeOrder(orderSummary);
+    setSelectedOrder(normalizedSummary);
+    try {
+      setSelectedOrderLoading(true);
+      const detailed = await api.orders.get(orderSummary.id);
+      setSelectedOrder(prev => mergeOrders(prev ?? normalizedSummary, detailed));
+    } catch (err) {
+      setError(err.message);
+    } finally {
+      setSelectedOrderLoading(false);
+    }
+  }
 }
 
 function StatCard({ title, value, gradient, icon, textColor }) {
