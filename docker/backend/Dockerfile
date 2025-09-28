@@ -28,7 +28,13 @@ RUN composer install --no-dev --prefer-dist --optimize-autoloader --no-scripts
 
 COPY . .
 
-RUN php artisan package:discover --ansi \
+RUN mkdir -p \
+        storage/framework/cache \
+        storage/framework/sessions \
+        storage/framework/views \
+        storage/logs \
+        bootstrap/cache \
+    && php artisan package:discover --ansi \
     && chown -R www-data:www-data storage bootstrap/cache
 
 USER www-data
