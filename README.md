@@ -63,19 +63,20 @@ Common optimization-friendly commands:
    cd supermarket/docker/traefik
    docker compose up -d
    ```
-   > **Note:** Traefik is now bundled inside the primary compose file, so this step is only needed if you prefer to run the gateway independently or reuse it across multiple repositories.
-4. Build and launch the full stack with Docker Compose (frontend, backend, Postgres, Redis, optional Traefik helper):
+   > **Note:** The helper script described below automatically runs this compose file for you. Use this manual step only if you want to manage Traefik separately.
+4. Build and launch the full stack with Docker Compose (frontend, backend, Postgres, Redis, Traefik helper):
    ```bash
    cd supermarket
    docker compose up --build
    ```
    Or use the helper script (handles the external Traefik network and optional build):
    ```bash
-   ./scripts/start-services.sh        # build + start
+   ./scripts/start-services.sh            # build + start (includes Traefik companion)
    ./scripts/start-services.sh --no-build
+   ./scripts/start-services.sh --no-traefik
    ```
-   - Frontend SPA: <http://localhost:8080>
-   - Backend API: <http://localhost:8081/api>
+   - Frontend SPA (+ proxied API): <http://localhost:8080>
+   - Backend API direct port: <http://localhost:8081/api>
    - PostgreSQL: localhost:5433 (user/password: `supermarket`)
    - Redis: localhost:6379
    - Traefik dashboard (basic auth protected): <http://localhost/traefik>
@@ -86,6 +87,7 @@ Common optimization-friendly commands:
 
 ### Compose environment knobs
 - `VITE_API_BASE_URL` build arg overrides the API origin baked into the SPA. Runtime defaults detect port `8080` and automatically target `http://<host>:8081/api`, so you can usually leave this unset unless pointing at an external API host.
+   - With the built-in reverse proxy, leaving this unset makes the SPA call `<origin>/api`, which nginx forwards to the backend container.
 - `VITE_BASE_PATH` adjusts the public path when serving the SPA behind a reverse proxy prefix (e.g. `/shop/`).
 - `DB_DATABASE`, `DB_USERNAME`, `DB_PASSWORD` bubble through to both services to keep credentials consistent.
 - `TRAEFIK_NETWORK` identifies the external network shared with your Traefik reverse proxy (defaults to `traefik_proxy`).
@@ -99,7 +101,7 @@ Common optimization-friendly commands:
 
 ### Quick smoke test checklist
 1. Visit <http://localhost:8080> – the storefront should load (200 status, no mixed content warnings).
-2. Add a product to the cart and continue to checkout to confirm API calls reach <http://localhost:8081/api>.
+2. Add a product to the cart and continue to checkout to confirm API calls reach <http://localhost:8080/api> (nginx proxies to the backend).
 3. (Optional) Navigate to <http://localhost/traefik>, authenticate with the default credential, and confirm any custom routers you configure for domain mappings.
 4. (Optional) When you map real domains, update Traefik (or your proxy) to route the hostnames to ports 8080 and 8081 respectively, then re-run the smoke test.
 

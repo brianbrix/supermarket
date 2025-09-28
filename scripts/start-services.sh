@@ -4,9 +4,10 @@ set -euo pipefail
 # Starts the supermarket stack behind Traefik.
 #
 # Usage:
-#   ./scripts/start-services.sh            # build + start all services
-#   ./scripts/start-services.sh --no-build # reuse existing images
-#   ./scripts/start-services.sh -- logs    # pass extra args to `docker compose up`
+#   ./scripts/start-services.sh                 # build + start all services (Traefik + stack)
+#   ./scripts/start-services.sh --no-build      # reuse existing images
+#   ./scripts/start-services.sh --no-traefik    # skip launching the Traefik companion stack
+#   ./scripts/start-services.sh -- logs         # pass extra args to `docker compose up`
 #
 # Environment variables:
 #   TRAEFIK_NETWORK  Name of the external Traefik network (default: traefik_proxy)
@@ -21,6 +22,7 @@ cd "${PROJECT_ROOT}"
 COMPOSE_CMD=${COMPOSE_CMD:-"docker compose"}
 TRAEFIK_NETWORK=${TRAEFIK_NETWORK:-traefik_proxy}
 BUILD_IMAGES=1
+START_TRAEFIK=1
 
 info() { printf '\033[1;34m[info]\033[0m %s\n' "$*"; }
 warn() { printf '\033[1;33m[warn]\033[0m %s\n' "$*"; }
@@ -34,13 +36,18 @@ while [[ $# -gt 0 ]]; do
       BUILD_IMAGES=0
       shift
       ;;
+    --no-traefik)
+      START_TRAEFIK=0
+      shift
+      ;;
     --help|-h)
       cat <<'EOF'
 Usage: ./scripts/start-services.sh [options] [-- docker compose args]
 
 Options:
-  --no-build   Skip image build and reuse existing images.
-  -h, --help   Show this help text.
+  --no-build     Skip image build and reuse existing images.
+  --no-traefik   Do not launch the Traefik companion stack.
+  -h, --help     Show this help text.
 
 Any arguments after "--" are passed directly to "docker compose up".
 EOF
@@ -72,7 +79,14 @@ fi
 if ! docker network inspect "${TRAEFIK_NETWORK}" >/dev/null 2>&1; then
   warn "Traefik network '${TRAEFIK_NETWORK}' not found. Creating it now."
   docker network create "${TRAEFIK_NETWORK}" >/dev/null
-  info "Created network '${TRAEFIK_NETWORK}'. Ensure your Traefik container joins this network."
+  info "Created network '${TRAEFIK_NETWORK}'."
+fi
+
+if [[ ${START_TRAEFIK} -eq 1 ]]; then
+  info "Launching Traefik companion stack..."
+  (cd docker/traefik && ${COMPOSE_CMD} up -d)
+else
+  warn "Skipping Traefik startup (--no-traefik). Ensure a reverse proxy is already running if required."
 fi
 
 # --- build & start ----------------------------------------------------------
@@ -94,4 +108,4 @@ fi
 info "Waiting for containers to become healthy..."
 ${COMPOSE_CMD} -f docker-compose.yml ps
 
-info "Stack is up. Access the shop via the Traefik route (e.g. http://<IP>/shop)."
+info "Stack is up. Frontend: http://localhost:8080  |  API: http://localhost:8081/api"

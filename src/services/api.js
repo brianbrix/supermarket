@@ -12,7 +12,7 @@ const runtimeDefaultBase = (() => {
     const url = new URL(window.location.href);
     const { protocol, hostname, port } = url;
     if (port === '8080') {
-      return `${protocol}//${hostname}:8081/api`;
+      return `${url.origin}/api`;
     }
     if (!port || port === '80' || port === '443') {
       return `${url.origin}/api`;
@@ -22,7 +22,15 @@ const runtimeDefaultBase = (() => {
   return '/api';
 })();
 
-const BASE_URL = import.meta.env.VITE_API_BASE_URL || runtimeDefaultBase;
+const configuredBase = (() => {
+  const raw = import.meta.env.VITE_API_BASE_URL;
+  if (raw == null) return '';
+  const trimmed = String(raw).trim();
+  if (!trimmed || trimmed === '""' || trimmed === "''") return '';
+  return trimmed.replace(/^['"]|['"]$/g, '');
+})();
+
+const BASE_URL = configuredBase || runtimeDefaultBase;
 // Derive origin by stripping a trailing /api (with optional slash) if present
 const API_ORIGIN = BASE_URL.replace(/\/$/, '').replace(/\/api$/, '');
 

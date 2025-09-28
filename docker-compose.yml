@@ -1,38 +1,13 @@
 version: "3.9"
 
 services:
-  traefik:
-    image: traefik:v3.1
-    container_name: traefik-gateway
-    restart: unless-stopped
-    ports:
-      - "80:80"
-      - "443:443"
-    volumes:
-      - /var/run/docker.sock:/var/run/docker.sock:ro
-      - ./docker/traefik/traefik.yml:/etc/traefik/traefik.yml:ro
-      - ./docker/traefik/dynamic:/etc/traefik/dynamic:ro
-      - ./docker/traefik/dashboard-users.htpasswd:/etc/traefik/dashboard-users.htpasswd:ro
-      - traefik-acme:/etc/traefik/acme
-    environment:
-      TRAEFIK_LOG_LEVEL: ${TRAEFIK_LOG_LEVEL:-INFO}
-    networks:
-      - default
-      - traefik
-    labels:
-      - "traefik.enable=true"
-      - "traefik.http.routers.traefik.rule=PathPrefix(`/traefik`)"
-      - "traefik.http.routers.traefik.entrypoints=web"
-      - "traefik.http.routers.traefik.service=api@internal"
-      - "traefik.http.middlewares.traefik-strip.stripprefix.prefixes=/traefik"
-      - "traefik.http.routers.traefik.middlewares=traefik-strip,dashboard-auth@file"
 
   frontend:
     build:
       context: .
       dockerfile: docker/frontend/Dockerfile
       args:
-        VITE_API_BASE_URL: ${VITE_API_BASE_URL:-""}
+        VITE_API_BASE_URL: ${VITE_API_BASE_URL-}
         VITE_BASE_PATH: ${VITE_BASE_PATH:-/}
     image: supermarket-frontend:latest
     depends_on:
