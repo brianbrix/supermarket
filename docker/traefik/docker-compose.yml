@@ -1,5 +1,3 @@
-version: "3.9"
-
 services:
   traefik:
     image: traefik:v3.1
@@ -32,4 +30,5 @@ volumes:
 
 networks:
   traefik_proxy:
+    external: true
     name: ${TRAEFIK_NETWORK:-traefik_proxy}

@@ -75,6 +75,7 @@ Common optimization-friendly commands:
    ./scripts/start-services.sh --no-build
    ./scripts/start-services.sh --no-traefik
    ```
+   > The helper script ensures the `${TRAEFIK_NETWORK}` external network exists before launching the Traefik stack.
    - Frontend SPA (+ proxied API): <http://localhost:8080>
    - Backend API direct port: <http://localhost:8081/api>
    - PostgreSQL: localhost:5433 (user/password: `supermarket`)
