@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
-import Select from 'react-select';
+import { Typeahead } from 'react-bootstrap-typeahead';
 import FilterBar from '../../components/FilterBar.jsx';
 import { api } from '../../services/api.js';
 
@@ -46,7 +46,6 @@ export default function AdminBrands() {
   const [slugTouched, setSlugTouched] = useState(false);
   const [reloadToken, setReloadToken] = useState(0);
   const debounceRef = useRef();
-  const selectMenuPortalTarget = typeof document !== 'undefined' ? document.body : undefined;
 
   useEffect(() => {
     let cancelled = false;
@@ -394,16 +393,17 @@ export default function AdminBrands() {
                 </div>
                 <div>
                   <label className="form-label small text-muted">Categories</label>
-                  <Select
-                    isMulti
-                    isClearable
-                    menuPortalTarget={selectMenuPortalTarget}
-                    classNamePrefix="brand-category-select"
+                  <Typeahead
+                    id="brand-categories"
+                    multiple
+                    clearButton
+                    labelKey="label"
                     options={categoryOptions}
-                    value={selectedCategoryOptions}
+                    selected={selectedCategoryOptions}
                     onChange={handleCategoriesChange}
                     placeholder={categoryOptions.length ? 'Search categories…' : 'Loading categories…'}
-                    isDisabled={!categoryOptions.length}
+                    disabled={!categoryOptions.length}
+                    emptyLabel={categoryOptions.length ? 'No matching category' : 'Loading categories…'}
                   />
                   <div className="form-text small">Select all categories this brand should appear under in the storefront.</div>
                 </div>

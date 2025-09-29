@@ -18,6 +18,9 @@ const normalizedBasePath = (() => {
 export default defineConfig({
   base: normalizedBasePath,
   plugins: [react()],
+  optimizeDeps: {
+    include: ['react-bootstrap-typeahead']
+  },
   build: {
     target: 'es2022',
     sourcemap: false,

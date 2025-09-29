@@ -1,9 +1,9 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { Link } from 'react-router-dom';
+import { Typeahead } from 'react-bootstrap-typeahead';
 import { api, mapProductResponse } from '../../services/api.js';
 import FilterBar from '../../components/FilterBar.jsx';
 import PaginationBar from '../../components/PaginationBar.jsx';
-import Select from 'react-select';
 
 const makeEmptyForm = () => ({ name: '', brandId: '', brandName: '', categoryId: '', price: '', description: '', stock: '0', unit: '', tagSlugs: [] });
 
@@ -27,7 +27,7 @@ export default function AdminProducts() {
   const didInitialLoadRef = useRef(false); // guard StrictMode double invoke
   const categoriesLoadedRef = useRef(false); // ensure categories list fetched only once
   const [categories, setCategories] = useState([]);
-  const brandsLoadedRef = useRef(false);
+  const brandCacheRef = useRef(new Map());
   const [brands, setBrands] = useState([]);
   const [brandsLoading, setBrandsLoading] = useState(false);
   const tagsLoadedRef = useRef(false); // ensure tags fetched only once
@@ -53,26 +53,45 @@ export default function AdminProducts() {
       }))
       .sort((a, b) => a.label.localeCompare(b.label));
   }, [tags]);
-  const selectedTagOptions = useMemo(() => {
+
   const selectedBrandOption = useMemo(() => {
     if (form.brandId) {
       return brandOptionsMemo.find(option => option.value === form.brandId)
-        ?? (form.brandName ? { value: form.brandId, label: form.brandName } : null);
+        ?? (form.brandName ? { value: form.brandId, label: form.brandName, customOption: true } : null);
     }
     if (form.brandName) {
-      return { value: '__custom__', label: form.brandName };
+      return { value: form.brandName, label: form.brandName, customOption: true };
     }
     return null;
   }, [form.brandId, form.brandName, brandOptionsMemo]);
-    if (!Array.isArray(form.tagSlugs)) return [];
-    const slugs = form.tagSlugs.map(String);
-    const known = tagOptionsMemo.filter(option => slugs.includes(option.value));
-    const missing = slugs
-      .filter(slug => !known.some(option => option.value === slug))
-      .map(slug => ({ value: slug, label: `${slug} (inactive)` }));
-    return [...known, ...missing];
+
+  const brandSelectOptions = useMemo(() => {
+    if (!selectedBrandOption) return brandOptionsMemo;
+    const exists = brandOptionsMemo.some(option => option.value === selectedBrandOption.value);
+    return exists ? brandOptionsMemo : [...brandOptionsMemo, selectedBrandOption];
+  }, [brandOptionsMemo, selectedBrandOption]);
+
+  const tagSelectOptions = useMemo(() => {
+    if (!Array.isArray(form.tagSlugs) || form.tagSlugs.length === 0) {
+      return tagOptionsMemo;
+    }
+    const slugs = new Set(form.tagSlugs.map(String));
+    const missing = Array.from(slugs)
+      .filter(slug => !tagOptionsMemo.some(option => option.value === slug))
+      .map(slug => ({ value: slug, label: `${slug} (inactive)`, customOption: true }));
+    if (missing.length === 0) {
+      return tagOptionsMemo;
+    }
+    return [...tagOptionsMemo, ...missing];
   }, [form.tagSlugs, tagOptionsMemo]);
-  const selectMenuPortalTarget = typeof document !== 'undefined' ? document.body : undefined;
+
+  const selectedTagOptions = useMemo(() => {
+    if (!Array.isArray(form.tagSlugs)) return [];
+    const slugs = new Set(form.tagSlugs.map(String));
+    return tagSelectOptions.filter(option => slugs.has(option.value));
+  }, [form.tagSlugs, tagSelectOptions]);
+
+  const brandSelected = selectedBrandOption ? [selectedBrandOption] : [];
 
   useEffect(() => () => {
     pendingPreviews.forEach(url => URL.revokeObjectURL(url));
@@ -167,12 +186,23 @@ export default function AdminProducts() {
     setForm(f => ({ ...f, [name]: value }));
   }
 
-  function handleBrandSelect(option) {
-    if (!option || option.value === '__custom__') {
+  function handleBrandSelect(selection) {
+    const option = Array.isArray(selection) ? selection[0] : selection;
+    if (!option) {
       setForm(f => ({ ...f, brandId: '', brandName: '' }));
       return;
     }
+    if (option.customOption) {
+      const label = (option.label ?? option.value ?? '').trim();
+      setForm(f => ({ ...f, brandId: '', brandName: label }));
+      return;
+    }
     setForm(f => ({ ...f, brandId: option.value, brandName: option.label }));
+  }
+
+  function handleTagSelect(selected) {
+    const values = Array.isArray(selected) ? selected.map(option => option.value) : [];
+    setForm(f => ({ ...f, tagSlugs: values }));
   }
 
   function handleCancel(){
@@ -431,19 +461,25 @@ export default function AdminProducts() {
                     <span>Brand</span>
                     <Link to="/admin/brands" className="small">Manage brands</Link>
                   </label>
-                  <Select
-                    inputId="product-brand"
-                    classNamePrefix="brand-select"
-                    isClearable
-                    isSearchable
-                    isDisabled={brandsLoading && brandOptionsMemo.length === 0}
-                    isLoading={brandsLoading}
-                    menuPortalTarget={selectMenuPortalTarget}
+                  <Typeahead
+                    id="product-brand"
+                    labelKey="label"
+                    clearButton
+                    allowNew
+                    highlightOnlyResult
                     options={brandOptionsMemo}
-                    value={selectedBrandOption}
+                    selected={brandSelected}
                     onChange={handleBrandSelect}
                     placeholder={brandOptionsMemo.length === 0 && !brandsLoading ? 'Create a brand first' : 'Select a brand…'}
-                    noOptionsMessage={({ inputValue }) => inputValue ? 'No matching brand' : 'Start typing to search brands.'}
+                    emptyLabel={brandsLoading ? 'Loading brands…' : (brandOptionsMemo.length ? 'No matching brand' : 'Create a brand first')}
+                    isLoading={brandsLoading}
+                    disabled={brandsLoading && brandOptionsMemo.length === 0}
+                    renderMenuItemChildren={(option) => (
+                      <div className="d-flex flex-column">
+                        <span>{option.label}</span>
+                        {option.description && <small className="text-muted">{option.description}</small>}
+                      </div>
+                    )}
                   />
                   <div className="form-text small">Link products to brands to power storefront filters.</div>
                 </div>
@@ -459,21 +495,23 @@ export default function AdminProducts() {
                     <span>Tags</span>
                     <Link to="/admin/product-tags" className="small">Manage tags</Link>
                   </label>
-                  <Select
-                    inputId="product-tags"
-                    classNamePrefix="tag-select"
-                    isMulti
-                    isClearable
-                    menuPortalTarget={selectMenuPortalTarget}
-                    options={tagOptionsMemo}
-                    value={selectedTagOptions}
-                    onChange={(selected) => {
-                      const values = Array.isArray(selected) ? selected.map(option => option.value) : [];
-                      setForm(f => ({ ...f, tagSlugs: values }));
-                    }}
+                  <Typeahead
+                    id="product-tags"
+                    labelKey="label"
+                    multiple
+                    clearButton
+                    options={tagSelectOptions}
+                    selected={selectedTagOptions}
+                    onChange={handleTagSelect}
                     placeholder={tags.length === 0 ? 'Create tags to start tagging products' : 'Search and select tags…'}
-                    noOptionsMessage={({ inputValue }) => inputValue ? 'No matching tag. Try a different keyword.' : 'Start typing to search tags.'}
-                    isDisabled={tags.length === 0}
+                    emptyLabel={tagSelectOptions.length ? 'No matching tag' : 'Create tags to start tagging products'}
+                    disabled={tagSelectOptions.length === 0}
+                    renderMenuItemChildren={(option) => (
+                      <div className="d-flex flex-column">
+                        <span>{option.label}</span>
+                        {option.description && <small className="text-muted">{option.description}</small>}
+                      </div>
+                    )}
                   />
                   <div className="form-text small">Type to search, press Enter to add, and use backspace to remove a tag.</div>
                 </div>

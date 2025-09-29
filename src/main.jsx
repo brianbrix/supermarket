@@ -2,6 +2,7 @@ import { createRoot } from 'react-dom/client'
 import 'bootstrap/dist/css/bootstrap.min.css';
 import 'bootstrap-icons/font/bootstrap-icons.css';
 import 'leaflet/dist/leaflet.css';
+import 'react-bootstrap-typeahead/css/Typeahead.css';
 import './index.css'
 import App from './App.jsx'
 
