@@ -12,7 +12,7 @@ ARG VITE_BASE_PATH
 ENV VITE_BASE_PATH=${VITE_BASE_PATH}
 
 COPY . .
-RUN npm run build
+RUN npm run build --no-cache
 
 FROM nginx:1.27-alpine
 WORKDIR /usr/share/nginx/html
