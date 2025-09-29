@@ -17,9 +17,9 @@ class ProductController extends Controller
     {
         $sort = $request->get('sort', 'name');
         $direction = strtolower($request->get('direction', 'asc')) === 'desc' ? 'desc' : 'asc';
-    $allowed = ['name','brand','price','stock','id','created_at'];
+        $allowed = ['name','brand','price','stock','id','created_at'];
         if (!in_array($sort, $allowed, true)) { $sort = 'name'; }
-    $query = Product::query()->with(['category', 'images', 'tags']);
+        $query = Product::query()->with(['category', 'images', 'tags', 'brand']);
     $pageSize = min(100, (int)$request->get('size', 20));
     $paginator = $query->orderBy($sort, $direction)->paginate($pageSize);
     return $this->pageResponse($paginator, ProductResource::collection($paginator->items()));
@@ -41,7 +41,7 @@ class ProductController extends Controller
             $sort = 'name';
         }
 
-    $query = Product::query()->with(['category', 'images', 'tags']);
+        $query = Product::query()->with(['category', 'images', 'tags', 'brand']);
 
         if ($q) {
             $safeQ = str_replace(['%', '_'], ['\\%', '\\_'], $q);
@@ -49,19 +49,66 @@ class ProductController extends Controller
                 $like = "%{$safeQ}%";
                 $w->where('name', 'ilike', $like)
                     ->orWhere('description', 'ilike', $like)
-                    ->orWhere('brand', 'ilike', $like);
+                    ->orWhere('brand', 'ilike', $like)
+                    ->orWhereHas('brand', function ($sub) use ($like) {
+                        $sub->where('name', 'ilike', $like)
+                            ->orWhere('slug', 'ilike', $like);
+                    });
             });
         }
 
         $brand = $request->get('brand');
-        $brands = $request->get('brands');
         if ($brand) {
-            $query->where('brand', 'ilike', '%' . str_replace(['%', '_'], ['\\%', '\\_'], $brand) . '%');
+            $safeBrand = '%' . str_replace(['%', '_'], ['\\%', '\\_'], $brand) . '%';
+            $query->where(function ($w) use ($safeBrand) {
+                $w->where('brand', 'ilike', $safeBrand)
+                    ->orWhereHas('brand', function ($b) use ($safeBrand) {
+                        $b->where('name', 'ilike', $safeBrand)
+                            ->orWhere('slug', 'ilike', $safeBrand);
+                    });
+            });
         }
-        if (is_array($brands) && !empty($brands)) {
-            $brandList = array_values(array_filter($brands, fn ($b) => $b !== null && $b !== ''));
+
+        $brandId = $request->get('brandId') ?? $request->get('brand_id');
+        if ($brandId) {
+            $query->where('brand_id', (int) $brandId);
+        }
+
+        $brandIdsInput = $request->input('brandIds');
+        if ($brandIdsInput !== null) {
+            $brandIds = is_array($brandIdsInput) ? $brandIdsInput : explode(',', (string) $brandIdsInput);
+            $normalized = array_values(array_filter(array_map(function ($value) {
+                return is_numeric($value) ? (int) $value : null;
+            }, $brandIds), fn ($value) => $value !== null));
+            if (!empty($normalized)) {
+                $query->whereIn('brand_id', $normalized);
+            }
+        }
+
+        $brandSlugsInput = $request->input('brandSlugs');
+        if ($brandSlugsInput !== null) {
+            $brandSlugs = array_values(array_filter(array_map(function ($value) {
+                return $value === null ? null : Str::slug((string) $value);
+            }, Arr::wrap($brandSlugsInput)), fn ($value) => $value !== null && $value !== ''));
+            if (!empty($brandSlugs)) {
+                $query->whereHas('brand', function ($b) use ($brandSlugs) {
+                    $b->whereIn('slug', $brandSlugs);
+                });
+            }
+        }
+
+        $brandsInput = $request->input('brands');
+        if ($brandsInput !== null) {
+            $brandList = array_values(array_filter(Arr::wrap($brandsInput), fn ($b) => $b !== null && $b !== ''));
             if (!empty($brandList)) {
-                $query->whereIn('brand', $brandList);
+                $query->where(function ($w) use ($brandList) {
+                    $w->whereIn('brand', $brandList)
+                        ->orWhereHas('brand', function ($b) use ($brandList) {
+                            $slugs = array_map(fn ($value) => Str::slug((string) $value), $brandList);
+                            $b->whereIn('slug', $slugs)
+                                ->orWhereIn('name', $brandList);
+                        });
+                });
             }
         }
         if ($categoryId) {
@@ -143,6 +190,7 @@ class ProductController extends Controller
                 $query->orderBy('position')->orderBy('id');
             },
             'tags',
+            'brand',
         ]);
         return new ProductResource($product);
     }
@@ -183,7 +231,7 @@ class ProductController extends Controller
             return Product::query()
                 ->select('products.*')
                 ->where('products.id', '!=', $product->id)
-                ->with(['category', 'images', 'tags'])
+                ->with(['category', 'images', 'tags', 'brand'])
                 ->selectRaw(
                     '(CASE WHEN products.category_id = ? THEN ?::numeric ELSE 0::numeric END)'
                     . ' + (1 - LEAST(ABS(products.price - ?::numeric) / NULLIF(?::numeric, 0::numeric), 1)) * ?::numeric'

@@ -3,6 +3,8 @@ import { api, mapProductResponse } from '../services/api.js';
 import { BRAND_NAME } from '../config/brand.js';
 import { useSettings } from '../context/SettingsContext.jsx';
 import SectionRenderer, { clamp } from '../components/homepage/SectionRenderer.jsx';
+import { useTheme } from '../context/ThemeContext.jsx';
+import { STORE_THEMES, DEFAULT_STORE_THEME, normalizeStoreTheme } from '../config/storeThemes.js';
 
 const DEFAULT_HOME_LAYOUT = () => ({
   slug: 'home',
@@ -14,6 +16,7 @@ const DEFAULT_HOME_LAYOUT = () => ({
       {
         id: 'hero-primary',
         type: 'hero',
+        style: 'classic-fresh',
         headline: 'Essentials delivered lightning fast',
         subheading: 'Shop fresh groceries, household staples, and top brands with same-day delivery.',
         backgroundImage: null,
@@ -29,6 +32,7 @@ const DEFAULT_HOME_LAYOUT = () => ({
       {
         id: 'featured-categories',
         type: 'category-grid',
+        style: 'fresh-canopy',
         title: 'Shop by category',
         subtitle: 'Jump into popular aisles shoppers love right now.',
         columns: 4,
@@ -46,6 +50,7 @@ const DEFAULT_HOME_LAYOUT = () => ({
       {
         id: 'daily-deals',
         type: 'product-carousel',
+        style: 'glass-emerald',
         title: 'Daily price drops',
         dataSource: {
           type: 'dynamic',
@@ -78,6 +83,7 @@ const DEFAULT_HOME_LAYOUT = () => ({
       {
         id: 'top-rated',
         type: 'product-carousel',
+        style: 'midnight-luxe',
         title: 'Highly rated by shoppers',
         dataSource: {
           type: 'dynamic',
@@ -95,6 +101,7 @@ const DEFAULT_HOME_LAYOUT = () => ({
       {
         id: 'content-rich-text',
         type: 'rich-text',
+        style: 'calm-paper',
         title: 'Why shoppers love Supermarket+',
         body: [
           { type: 'paragraph', content: 'We combine curated products, unbeatable freshness, and delightful delivery to keep your pantry stocked without the hassle.' },
@@ -108,7 +115,7 @@ const DEFAULT_HOME_LAYOUT = () => ({
     ]
   },
   meta: {
-    theme: 'light'
+    theme: 'fresh-emerald'
   }
 });
 
@@ -221,6 +228,7 @@ async function resolveProductsForSection(section) {
 export default function Home() {
   const { settings } = useSettings();
   const storeName = settings?.storeName || BRAND_NAME;
+  const { setStoreTheme, storeTheme: activeStoreTheme, setTheme, themeSource, theme: globalTheme } = useTheme();
   const [layout, setLayout] = useState(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(null);
@@ -287,10 +295,29 @@ export default function Home() {
   }, [layout]);
 
   const sections = layout?.layout?.sections?.map((section, index) => ({ section, index, key: sectionKey(section, index) })) ?? [];
-  const theme = layout?.meta?.theme === 'dark' ? 'dark' : 'light';
+  const experienceKey = normalizeStoreTheme(layout?.meta?.theme || DEFAULT_STORE_THEME);
+  const experienceTheme = STORE_THEMES[experienceKey] ?? STORE_THEMES[DEFAULT_STORE_THEME];
+  const experienceMode = experienceTheme?.mode || 'light';
+
+  useEffect(() => {
+    if (!layout) return;
+    if (experienceKey !== activeStoreTheme) {
+      setStoreTheme(experienceKey, 'layout');
+    }
+    if (experienceMode === 'dark' && globalTheme !== 'dark' && themeSource !== 'nav' && themeSource !== 'user') {
+      setTheme('dark', 'layout');
+    }
+    if (experienceMode !== 'dark' && globalTheme !== 'light' && themeSource !== 'nav' && themeSource !== 'user') {
+      setTheme('light', 'layout');
+    }
+  }, [layout, experienceKey, activeStoreTheme, experienceMode, setStoreTheme, setTheme, globalTheme, themeSource]);
+
+  const sectionThemeMode = layout?.meta?.mode === 'dark'
+    ? 'dark'
+    : (experienceMode === 'dark' ? 'dark' : 'light');
 
   return (
-    <div className={`homepage-page ${theme === 'dark' ? 'bg-dark text-white' : 'bg-body'}`}>
+    <div className={`homepage-page ${sectionThemeMode === 'dark' ? 'bg-dark text-white' : 'bg-body'}`} data-store-theme={experienceKey}>
       <div className="container-fluid px-0">
         {error && (
           <div className="alert alert-warning mx-3 mx-sm-4 mt-3" role="alert">
@@ -315,7 +342,8 @@ export default function Home() {
                 section={section}
                 storeName={storeName}
                 data={section.type === 'product-carousel' ? sectionProducts[key] : null}
-                theme={theme}
+                theme={sectionThemeMode}
+                experienceTheme={experienceKey}
               />
             ))}
           </div>

@@ -28,8 +28,9 @@ export default function ProductCard({ product, compact = false }) {
       navigate('/checkout');
     }
   }
+  const variantClass = compact ? ' product-card--compact' : ' product-card--standard';
   return (
-    <div className={`product-card card h-100 position-relative${compact ? ' product-card--compact' : ''}`}>
+    <div className={`product-card card h-100 position-relative${variantClass}`} data-card-variant={compact ? 'compact' : 'standard'}>
       {product.stock === 0 && <span className="badge text-bg-danger position-absolute top-0 end-0 m-2">Out</span>}
       {product.stock > 0 && product.stock <= 3 && <span className="badge text-bg-warning position-absolute top-0 end-0 m-2">{product.stock} left</span>}
       <Link to={`/product/${product.id}`} className="text-decoration-none text-reset">
@@ -37,7 +38,7 @@ export default function ProductCard({ product, compact = false }) {
           <div className="text-center mb-2" style={{fontSize:'2.5rem'}}>
             <ImageWithFallback src={product.image} alt={product.name} />
           </div>
-          {product.brand && <p className="text-uppercase text-success small mb-1 fw-semibold">{product.brand}</p>}
+          {product.brand && <p className="text-uppercase small mb-1 fw-semibold product-card__brand">{product.brand}</p>}
           {Number(product.ratingCount) > 0 && (
             <div className="mb-2">
               <RatingStars value={product.ratingAverage} count={product.ratingCount} size="sm" showCount readOnly />
@@ -48,8 +49,8 @@ export default function ProductCard({ product, compact = false }) {
         </div>
       </Link>
       <div className={`px-3 pb-3 mt-auto${compact ? ' pt-0' : ''}`}>
-        <p className="fw-semibold mb-2">{formatCurrency(product.price)} <span className="text-secondary small">/{product.unit}</span></p>
-        <button onClick={handleAdd} className="btn btn-success w-100 btn-sm" disabled={product.stock === 0}>Add</button>
+        <p className="fw-semibold mb-2 product-card__price">{formatCurrency(product.price)} <span className="text-secondary small">/{product.unit}</span></p>
+        <button onClick={handleAdd} className="btn btn-success w-100 btn-sm" disabled={product.stock === 0}>{compact ? 'Add' : 'Add to cart'}</button>
       </div>
     </div>
   );

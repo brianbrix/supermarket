@@ -5,6 +5,7 @@ import { Link, useNavigate } from 'react-router-dom';
 import { useCart } from '../context/CartContext.jsx';
 import { useToast } from '../context/ToastContext.jsx';
 import { useCurrencyFormatter } from '../context/SettingsContext.jsx';
+import { useTheme } from '../context/ThemeContext.jsx';
 import QRCode from 'qrcode';
 import ProgressSteps from '../components/ProgressSteps.jsx';
 import { generateOrderRef, sendEmailMock } from '../services/orderService.js';
@@ -84,6 +85,7 @@ export default function Checkout() {
   const navigate = useNavigate();
   const formatCurrency = useCurrencyFormatter();
   const formatKES = formatCurrency;
+  const { storeTheme } = useTheme();
 
   const persisted = (() => {
     let raw = {};
@@ -1910,7 +1912,7 @@ export default function Checkout() {
       deliveryInfo?.quote?.amount
     );
     return (
-      <section className="container py-4">
+      <section className="container py-4" data-store-theme={storeTheme}>
         <h1 className="h3 mb-3">Order Confirmed</h1>
         <div className="card shadow-sm border-0 mb-4">
           <div className="card-body">
@@ -2037,7 +2039,7 @@ export default function Checkout() {
 
   return (
     <>
-      <section className="container py-3 px-3 px-sm-4">
+      <section className="container py-3 px-3 px-sm-4" data-store-theme={storeTheme}>
       <h1 id="checkout-heading" tabIndex="-1" className="h3 mb-3">Checkout</h1>
       {!isAuthenticated && (
         <div className="alert alert-info d-flex flex-column flex-md-row align-items-md-center gap-2" role="status">

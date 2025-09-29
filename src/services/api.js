@@ -83,6 +83,12 @@ function flattenCategoryTree(nodes, stack = []) {
 let authTokenGetter = () => null;
 export function configureAuthTokenGetter(fn){ authTokenGetter = fn; }
 
+const CATEGORY_CACHE_TTL_MS = 5 * 60 * 1000; // 5 minutes
+let cachedCategoryTree = null;
+let cachedCategoryList = null;
+let categoryCacheTimestamp = 0;
+let categoryListPromise = null;
+
 async function request(path, options = {}) {
   const token = authTokenGetter();
   const headers = {
@@ -177,7 +183,7 @@ export const api = {
       const qs = params.toString();
       return request(`/products/${id}/related${qs ? `?${qs}` : ''}`);
     },
-    search: ({ q, brand, brands, categoryId, minPrice, maxPrice, inStock, scope, promoTag, tag, tags, trendingDays, ids, page = 0, size = 10 } = {}) => {
+    search: ({ q, brand, brands, brandId, brandIds, brandSlug, brandSlugs, categoryId, minPrice, maxPrice, inStock, scope, promoTag, tag, tags, trendingDays, ids, page = 0, size = 10 } = {}) => {
       const params = new URLSearchParams();
       if (q) params.set('q', q);
       if (scope) params.set('scope', scope);
@@ -200,6 +206,17 @@ export const api = {
       if (brand) params.set('brand', brand);
       if (Array.isArray(brands)) {
         brands.filter(Boolean).forEach(b => params.append('brands[]', b));
+      }
+      if (brandId) params.set('brandId', brandId);
+      if (Array.isArray(brandIds)) {
+        brandIds.filter(Boolean).forEach(value => params.append('brandIds[]', value));
+      }
+      if (brandSlug) params.set('brandSlug', slugify(brandSlug));
+      if (Array.isArray(brandSlugs)) {
+        brandSlugs
+          .map(value => slugify(value))
+          .filter(Boolean)
+          .forEach(slug => params.append('brandSlugs[]', slug));
       }
       if (categoryId) params.set('categoryId', categoryId);
       if (minPrice != null) params.set('minPrice', minPrice);
@@ -241,9 +258,58 @@ export const api = {
       })
     }
   },
+  brands: {
+    list: ({ categoryId, q, active = true, limit = 200 } = {}) => {
+      const params = new URLSearchParams();
+      if (categoryId) params.set('categoryId', categoryId);
+      if (q) params.set('q', q);
+      if (active !== undefined && active !== null) params.set('active', active ? 'true' : 'false');
+      if (limit != null) params.set('limit', Math.min(Math.max(Number(limit) || 0, 1), 500));
+      const qs = params.toString();
+      return request(`/brands${qs ? `?${qs}` : ''}`).then(res => res?.data ?? res ?? []);
+    }
+  },
   categories: {
-    list: () => request('/categories').then(tree => flattenCategoryTree(tree)),
-    tree: () => request('/categories')
+    list: () => {
+      const now = Date.now();
+      if (cachedCategoryList && (now - categoryCacheTimestamp) < CATEGORY_CACHE_TTL_MS) {
+        return Promise.resolve(cachedCategoryList);
+      }
+      if (categoryListPromise) {
+        return categoryListPromise.then(tree => flattenCategoryTree(tree));
+      }
+      categoryListPromise = request('/categories')
+        .then(tree => {
+          cachedCategoryTree = tree;
+          cachedCategoryList = flattenCategoryTree(tree);
+          categoryCacheTimestamp = Date.now();
+          return tree;
+        })
+        .finally(() => {
+          categoryListPromise = null;
+        });
+      return categoryListPromise.then(() => cachedCategoryList);
+    },
+    tree: () => {
+      const now = Date.now();
+      if (cachedCategoryTree && (now - categoryCacheTimestamp) < CATEGORY_CACHE_TTL_MS) {
+        return Promise.resolve(cachedCategoryTree);
+      }
+      if (categoryListPromise) {
+        return categoryListPromise.then(() => cachedCategoryTree);
+      }
+      categoryListPromise = request('/categories')
+        .then(tree => {
+          cachedCategoryTree = tree;
+          cachedCategoryList = flattenCategoryTree(tree);
+          categoryCacheTimestamp = Date.now();
+          return tree;
+        })
+        .finally(() => {
+          categoryListPromise = null;
+        });
+      return categoryListPromise;
+    }
   },
   orders: {
     create: (payload) => request('/orders', { method: 'POST', body: JSON.stringify(payload) }),
@@ -365,6 +431,22 @@ export const api = {
         if (direction) params.set('direction', direction);
         return request(`/admin/products?${params.toString()}`);
       }
+    },
+    brands: {
+      list: ({ page = 0, size = 20, q, categoryId, active, sort = 'name', direction = 'asc' } = {}) => {
+        const params = new URLSearchParams();
+        params.set('page', page);
+        params.set('size', size);
+        if (q) params.set('q', q);
+        if (categoryId) params.set('categoryId', categoryId);
+        if (active !== undefined && active !== null && active !== '') params.set('active', active);
+        if (sort) params.set('sort', sort);
+        if (direction) params.set('direction', direction);
+        return request(`/admin/brands?${params.toString()}`);
+      },
+      create: (payload) => request('/admin/brands', { method: 'POST', body: JSON.stringify(payload) }),
+      update: (id, payload) => request(`/admin/brands/${id}`, { method: 'PUT', body: JSON.stringify(payload) }),
+      delete: (id) => request(`/admin/brands/${id}`, { method: 'DELETE' })
     },
     payments: {
       list: (page=0,size=10, filters={}) => {
@@ -568,7 +650,10 @@ export function mapProductResponse(raw) {
   return {
     id: p.id,
     name: p.name,
-    brand: p.brand || '',
+    brand: (p.brandName ?? p.brand ?? p.brand_name ?? '') || '',
+    brandId: p.brandId ?? p.brand_id ?? null,
+    brandName: p.brandName ?? p.brand ?? p.brand_name ?? '',
+    brandSlug: p.brandSlug ?? p.brand_slug ?? null,
     price: Number(p.price),
     unit: p.unit || '',
     category: p.categoryName || 'Other',

@@ -1,4 +1,4 @@
-import { useState, useEffect, useRef } from 'react';
+import { useState, useEffect, useRef, useCallback } from 'react';
 import { useLocation, useNavigate } from 'react-router-dom';
 import { api, mapProductResponse } from '../services/api.js';
 import { BRAND_NAME } from '../config/brand.js';
@@ -21,6 +21,8 @@ const parseSectionFilters = (params) => {
   const collectionTitle = params.get('sectionTitle') || '';
   const query = params.get('q') || '';
   const brand = params.get('brand') || '';
+  const brandIdParam = params.get('brandId');
+  const brandSlugParam = toSlug(params.get('brandSlug') || params.get('brand')) || null;
   const categoryIdParam = params.get('categoryId');
   const categorySlug = toSlug(params.get('category')) || null;
   const inStockRaw = params.get('inStock');
@@ -53,6 +55,8 @@ const parseSectionFilters = (params) => {
     state: {
       query,
       brand,
+  brandId: brandIdParam ? String(brandIdParam) : null,
+  brandSlug: brandSlugParam,
       categoryId: categoryIdParam ? String(categoryIdParam) : null,
       categorySlug,
       inStock: boolFromParam(inStockRaw) ?? false,
@@ -111,32 +115,76 @@ const applyStaticFiltersToResults = (items, staticFilters) => {
   return next;
 };
 
+const ALL_CATEGORY_KEY = 'all';
+
+const normalizeBrandOptions = (list) => {
+  if (!Array.isArray(list)) return [];
+  const seen = new Set();
+  const options = [];
+  list.forEach(brand => {
+    const rawId = brand?.id ?? brand?.brandId ?? brand?.value ?? null;
+    const id = rawId == null ? '' : String(rawId).trim();
+    if (!id || seen.has(id)) return;
+    const nameSource = brand?.name ?? brand?.title ?? brand?.displayName ?? brand?.label ?? '';
+    const name = String(nameSource).trim();
+    if (!name) return;
+    seen.add(id);
+    const slugSource = brand?.slug ?? brand?.handle ?? name;
+    const slug = toSlug(slugSource) || null;
+    options.push({
+      id,
+      name,
+      slug,
+      raw: brand
+    });
+  });
+  options.sort((a, b) => a.name.localeCompare(b.name, undefined, { sensitivity: 'base' }));
+  return options;
+};
+
 export default function Products() {
   const location = useLocation();
   const navigate = useNavigate();
   const slugToIdRef = useRef({});
-  const initialCategorySlugRef = useRef(null);
-  const initialCategoryIdRef = useRef(null);
-  const syncingFromUrlRef = useRef(false);
   const initialParsedFiltersRef = useRef(null);
   if (initialParsedFiltersRef.current === null) {
     initialParsedFiltersRef.current = parseSectionFilters(new URLSearchParams(location.search));
   }
   const initialParsed = initialParsedFiltersRef.current;
+  const initialCategorySlugRef = useRef(null);
+  const initialCategoryIdRef = useRef(null);
+  const initialBrandSlugRef = useRef(null);
+  const initialBrandIdRef = useRef(null);
+  const initialBrandNameRef = useRef('');
+  const initialBrandHydratedRef = useRef(false);
+  const syncingFromUrlRef = useRef(false);
   if (initialCategorySlugRef.current === null) {
     initialCategorySlugRef.current = initialParsed.state.categorySlug ?? toSlug(new URLSearchParams(location.search).get('category'));
   }
   if (initialCategoryIdRef.current === null) {
     initialCategoryIdRef.current = initialParsed.state.categoryId;
   }
+  if (initialBrandSlugRef.current === null) {
+    initialBrandSlugRef.current = initialParsed.state.brandSlug ?? toSlug(initialParsed.state.brand);
+  }
+  if (initialBrandIdRef.current === null) {
+    initialBrandIdRef.current = initialParsed.state.brandId ?? null;
+  }
+  if (initialBrandNameRef.current === '') {
+    initialBrandNameRef.current = initialParsed.state.brand || '';
+  }
   const { settings } = useSettings();
   const storeName = settings?.storeName || BRAND_NAME;
   const [sectionFilters, setSectionFilters] = useState(initialParsed);
   const [collectionTitle, setCollectionTitle] = useState(initialParsed.collectionTitle);
   const [query, setQuery] = useState(initialParsed.state.query || '');
-  const [brand, setBrand] = useState(initialParsed.state.brand || '');
+  const [brandId, setBrandId] = useState(initialParsed.state.brandId ?? 'all');
+  const [brandOptionsByCategory, setBrandOptionsByCategory] = useState({});
+  const [brandOptions, setBrandOptions] = useState([]);
+  const [brandLoading, setBrandLoading] = useState(false);
   const [categoryId, setCategoryId] = useState(initialParsed.state.categoryId ?? 'all');
   const [categories, setCategories] = useState([]);
+  const categoriesRef = useRef([]);
   const [results, setResults] = useState([]);
   const [pageMeta, setPageMeta] = useState({ page:0, size:100, totalElements:0, totalPages:0, first:true, last:true });
   const [page, setPage] = useState(0);
@@ -153,14 +201,122 @@ export default function Products() {
   const initialSearchSkippedRef = useRef(false);
   const lastSearchKeyRef = useRef('');
   const lastFiltersNoPageRef = useRef('');
+  const fetchingBrandKeysRef = useRef(new Set());
   const activeCollectionTitle = (collectionTitle ?? '').trim();
+  const locationSearchRef = useRef(location.search);
+  const locationPathRef = useRef(location.pathname);
+
+  useEffect(() => {
+    categoriesRef.current = categories;
+  }, [categories]);
+
+  useEffect(() => {
+    locationSearchRef.current = location.search;
+  }, [location.search]);
+
+  useEffect(() => {
+    locationPathRef.current = location.pathname;
+  }, [location.pathname]);
+
+  const setCategorySelection = useCallback((value, { fromUrl = false, categoriesSnapshot } = {}) => {
+    const normalizedValue = value == null || value === '' ? 'all' : String(value);
+    if (fromUrl) {
+      syncingFromUrlRef.current = true;
+    }
+    setCategoryId(normalizedValue);
+    if (fromUrl) {
+      return;
+    }
+    const list = categoriesSnapshot ?? categoriesRef.current;
+    const params = new URLSearchParams(locationSearchRef.current);
+    if (normalizedValue === 'all') {
+      params.delete('category');
+      params.delete('categoryId');
+    } else {
+      const match = list.find(cat => String(cat.id) === normalizedValue);
+      if (!match) return;
+      const slug = toSlug(match.slug ?? match.raw?.slug ?? match.name);
+      if (!slug) return;
+      params.set('category', slug);
+      params.set('categoryId', normalizedValue);
+    }
+    const qs = params.toString();
+    navigate(`${locationPathRef.current}${qs ? `?${qs}` : ''}`, { replace: true });
+  }, [navigate]);
+
+  const setBrandSelection = useCallback((value, { fromUrl = false, brandSnapshot, brandName, brandSlug } = {}) => {
+    const normalizedValue = value == null || value === '' ? 'all' : String(value);
+    const list = brandSnapshot ?? brandOptions;
+    const selectedOption = normalizedValue === 'all' ? null : list.find(option => String(option.id) === normalizedValue);
+    const fallbackName = brandName ?? initialBrandNameRef.current ?? '';
+    const resolvedName = normalizedValue === 'all' ? '' : (selectedOption?.name ?? fallbackName);
+    const resolvedSlug = normalizedValue === 'all' ? null : (selectedOption?.slug ?? brandSlug ?? (resolvedName ? toSlug(resolvedName) : null));
+
+    setSectionFilters(prev => ({
+      ...prev,
+      state: {
+        ...prev.state,
+        brand: resolvedName,
+        brandId: normalizedValue === 'all' ? null : normalizedValue,
+        brandSlug: normalizedValue === 'all' ? null : resolvedSlug
+      }
+    }));
+
+    initialBrandIdRef.current = normalizedValue === 'all' ? null : normalizedValue;
+    initialBrandNameRef.current = resolvedName;
+    initialBrandSlugRef.current = resolvedSlug;
+
+    if (fromUrl) {
+      syncingFromUrlRef.current = true;
+      setBrandId(normalizedValue);
+      return;
+    }
+
+    if (brandId !== normalizedValue) {
+      setBrandId(normalizedValue);
+    }
+
+    const params = new URLSearchParams(location.search);
+    if (normalizedValue === 'all') {
+      params.delete('brandId');
+      params.delete('brandSlug');
+      params.delete('brand');
+    } else if (selectedOption) {
+      params.set('brandId', normalizedValue);
+      const slug = toSlug(selectedOption.slug ?? selectedOption.name ?? resolvedName);
+      if (slug) params.set('brandSlug', slug);
+      if (selectedOption.name || resolvedName) {
+        params.set('brand', selectedOption.name ?? resolvedName);
+      }
+    } else {
+      params.set('brandId', normalizedValue);
+      if (resolvedSlug) params.set('brandSlug', resolvedSlug);
+      if (resolvedName) params.set('brand', resolvedName);
+    }
+
+    const qs = params.toString();
+    navigate(`${location.pathname}${qs ? `?${qs}` : ''}`, { replace: true });
+  }, [brandOptions, brandId, location.pathname, location.search, navigate]);
 
   useEffect(() => {
     const parsed = parseSectionFilters(new URLSearchParams(location.search));
     setSectionFilters(parsed);
     setCollectionTitle(parsed.collectionTitle);
     setQuery(parsed.state.query || '');
-    setBrand(parsed.state.brand || '');
+    if (parsed.state.brandId) {
+      const id = String(parsed.state.brandId);
+      initialBrandIdRef.current = id;
+      setBrandId(id);
+    } else {
+      initialBrandIdRef.current = null;
+      setBrandId('all');
+    }
+    if (parsed.state.brandSlug) {
+      initialBrandSlugRef.current = parsed.state.brandSlug;
+    }
+    if (parsed.state.brand) {
+      initialBrandNameRef.current = parsed.state.brand;
+    }
     setInStockOnly(parsed.state.inStock ?? false);
     setCategoryId(parsed.state.categoryId ?? 'all');
     if (parsed.state.minPrice != null || parsed.state.maxPrice != null) {
@@ -239,7 +395,11 @@ export default function Products() {
         if (initialParsed.state.query) {
           searchPayload.q = initialParsed.state.query;
         }
-        if (initialParsed.state.brand) {
+        if (initialParsed.state.brandId) {
+          searchPayload.brandId = initialParsed.state.brandId;
+        } else if (initialParsed.state.brandSlug) {
+          searchPayload.brandSlug = initialParsed.state.brandSlug;
+        } else if (initialParsed.state.brand) {
           searchPayload.brand = initialParsed.state.brand;
         }
         if (initialParsed.state.inStock) {
@@ -260,7 +420,7 @@ export default function Products() {
           (Array.isArray(staticFilters?.tags) && staticFilters.tags.length > 0) ||
           (Array.isArray(staticFilters?.ids) && staticFilters.ids.length > 0)
         );
-        const shouldSearch = hasStaticFilters || initialCategory !== 'all' || Boolean(initialParsed.state.query) || Boolean(initialParsed.state.brand) || initialParsed.state.inStock || initialParsed.state.minPrice != null || initialParsed.state.maxPrice != null;
+  const shouldSearch = hasStaticFilters || initialCategory !== 'all' || Boolean(initialParsed.state.query) || Boolean(initialParsed.state.brandId) || Boolean(initialParsed.state.brand) || initialParsed.state.inStock || initialParsed.state.minPrice != null || initialParsed.state.maxPrice != null;
         const [pageResp, range] = await Promise.all([
           shouldSearch ? api.products.search(searchPayload) : api.products.list(0, size),
           api.products.priceRange(initialCategory !== 'all' ? initialCategory : undefined)
@@ -283,7 +443,8 @@ export default function Products() {
           max: presetMax != null ? presetMax : max
         });
         initialSearchSkippedRef.current = true;
-        lastFiltersNoPageRef.current = JSON.stringify({ q: '', brand: '', cat: initialCategory, min, max, stock: 0 });
+  const initialBrandKey = initialBrandIdRef.current ? String(initialBrandIdRef.current) : '';
+  lastFiltersNoPageRef.current = JSON.stringify({ q: '', brandId: initialBrandKey, cat: initialCategory, min, max, stock: 0 });
         lastSearchKeyRef.current = `${lastFiltersNoPageRef.current}|page=0`;
         setBaselineLoaded(true);
         setLoading(false);
@@ -295,10 +456,10 @@ export default function Products() {
     })();
 
     return () => { active = false; };
-  }, [size]);
+  }, [size, initialParsed, setCategorySelection]);
 
   const debouncedQuery = useDebounce(query, 500);
-  const debouncedBrand = useDebounce(brand, 400);
+  const debouncedBrandId = useDebounce(brandId, 300);
   const debouncedRange = useDebounce(priceRange, 400);
   const debouncedInStock = useDebounce(inStockOnly, 300);
   const debouncedCategory = useDebounce(categoryId, 300);
@@ -332,11 +493,11 @@ export default function Products() {
     const effectiveMin = rangeUninitialized ? sliderBounds.min : debouncedRange.min;
     const effectiveMax = rangeUninitialized ? sliderBounds.max : debouncedRange.max;
 
-    const normalizedBrand = (debouncedBrand || '').trim();
+    const normalizedBrandId = debouncedBrandId && debouncedBrandId !== 'all' ? String(debouncedBrandId) : '';
 
     const filtersNoPageKey = JSON.stringify({
       q: debouncedQuery || '',
-      brand: normalizedBrand,
+      brandId: normalizedBrandId,
       cat: debouncedCategory,
       min: effectiveMin,
       max: effectiveMax,
@@ -348,11 +509,11 @@ export default function Products() {
       return;
     }
 
-  const filtersKey = `${filtersNoPageKey}|page=${page}|scope=${sectionFilters.staticFilters.scope || ''}|tags=${(sectionFilters.staticFilters.tags || []).join(',')}|promo=${sectionFilters.staticFilters.promoTag || ''}|ids=${(sectionFilters.staticFilters.ids || []).join(',')}|minRating=${sectionFilters.staticFilters.minRating ?? ''}|trend=${sectionFilters.staticFilters.trendingDays ?? ''}`;
+    const filtersKey = `${filtersNoPageKey}|page=${page}|scope=${sectionFilters.staticFilters.scope || ''}|tags=${(sectionFilters.staticFilters.tags || []).join(',')}|promo=${sectionFilters.staticFilters.promoTag || ''}|ids=${(sectionFilters.staticFilters.ids || []).join(',')}|minRating=${sectionFilters.staticFilters.minRating ?? ''}|trend=${sectionFilters.staticFilters.trendingDays ?? ''}`;
     if (filtersKey === lastSearchKeyRef.current) return;
 
     if (!initialSearchSkippedRef.current) {
-      const noFiltersApplied = !debouncedQuery && !normalizedBrand && debouncedCategory === 'all' && !debouncedInStock && page === 0 &&
+      const noFiltersApplied = !debouncedQuery && !normalizedBrandId && debouncedCategory === 'all' && !debouncedInStock && page === 0 &&
         effectiveMin === sliderBounds.min && effectiveMax === sliderBounds.max;
       if (noFiltersApplied) {
         initialSearchSkippedRef.current = true;
@@ -374,7 +535,7 @@ export default function Products() {
     };
     applyStaticFiltersToPayload(payload, sectionFilters.staticFilters);
     if (debouncedQuery) payload.q = debouncedQuery;
-    if (normalizedBrand) payload.brand = normalizedBrand;
+    if (normalizedBrandId) payload.brandId = normalizedBrandId;
     if (debouncedCategory !== 'all') payload.categoryId = debouncedCategory;
     if (!rangeUninitialized && (effectiveMin !== sliderBounds.min || effectiveMax !== sliderBounds.max)) {
       payload.minPrice = effectiveMin;
@@ -385,9 +546,9 @@ export default function Products() {
     api.products.search(payload)
       .then(pageResp => {
         if (cancelled || lastSearchKeyRef.current !== requestKey) return;
-  const mapped = pageResp.content.map(mapProductResponse);
-  const hydrated = applyStaticFiltersToResults(mapped, sectionFilters.staticFilters);
-  setResults(hydrated);
+        const mapped = pageResp.content.map(mapProductResponse);
+        const hydrated = applyStaticFiltersToResults(mapped, sectionFilters.staticFilters);
+        setResults(hydrated);
         setPageMeta(pageResp);
         setLoading(false);
       })
@@ -397,15 +558,27 @@ export default function Products() {
         setLoading(false);
       });
     return () => { cancelled = true; };
-  }, [debouncedQuery, debouncedBrand, debouncedCategory, debouncedRange.min, debouncedRange.max, debouncedInStock, page, baselineLoaded, size, sliderBounds.min, sliderBounds.max, sectionFilters.staticFilters]);
+  }, [debouncedQuery, debouncedBrandId, debouncedCategory, debouncedRange.min, debouncedRange.max, debouncedInStock, page, baselineLoaded, size, sliderBounds.min, sliderBounds.max, sectionFilters.staticFilters]);
 
-  useEffect(() => { setPage(0); }, [debouncedQuery, debouncedBrand, debouncedCategory, debouncedRange.min, debouncedRange.max, debouncedInStock]);
+  useEffect(() => { setPage(0); }, [debouncedQuery, debouncedBrandId, debouncedCategory, debouncedRange.min, debouncedRange.max, debouncedInStock]);
 
   useEffect(() => {
-    if (syncingFromUrlRef.current) {
-      syncingFromUrlRef.current = false;
-    }
-  }, [categoryId]);
+    if (!syncingFromUrlRef.current) return;
+    const selectedCategory = categories.find(cat => String(cat.id) === categoryId);
+    const selectedBrand = brandOptions.find(option => String(option.id) === brandId);
+    setSectionFilters(prev => ({
+      ...prev,
+      state: {
+        ...prev.state,
+        categoryId: categoryId === 'all' ? null : categoryId,
+        categorySlug: selectedCategory?.slug ?? selectedCategory?.raw?.slug ?? (selectedCategory?.name ? toSlug(selectedCategory.name) : null),
+        brand: brandId === 'all' ? '' : (selectedBrand?.name ?? initialBrandNameRef.current ?? ''),
+        brandId: brandId === 'all' ? null : brandId,
+        brandSlug: brandId === 'all' ? null : (selectedBrand?.slug ?? toSlug(selectedBrand?.name ?? initialBrandNameRef.current ?? ''))
+      }
+    }));
+    syncingFromUrlRef.current = false;
+  }, [categoryId, brandId, categories, brandOptions]);
 
   useEffect(() => {
     if (!categories.length) return;
@@ -420,33 +593,145 @@ export default function Products() {
     if (matchId && String(matchId) !== String(categoryId)) {
       setCategorySelection(matchId, { fromUrl: true, categoriesSnapshot: categories });
     }
-  }, [location.search, categories, categoryId]);
+  }, [location.search, categories, categoryId, setCategorySelection]);
 
-  function setCategorySelection(value, { fromUrl = false, categoriesSnapshot } = {}) {
-    const normalizedValue = value == null || value === '' ? 'all' : String(value);
-    if (fromUrl) {
-      syncingFromUrlRef.current = true;
-    }
-    setCategoryId(normalizedValue);
-    if (fromUrl) {
+  useEffect(() => {
+    const key = categoryId === 'all' ? ALL_CATEGORY_KEY : String(categoryId);
+    const options = brandOptionsByCategory[key] ?? [];
+    setBrandOptions(options);
+  }, [categoryId, brandOptionsByCategory]);
+
+  useEffect(() => {
+    if (brandLoading || !Array.isArray(brandOptions)) return;
+
+    if (brandOptions.length === 0) {
+      if (brandId !== 'all') {
+        setBrandSelection('all', { brandSnapshot: [] });
+      }
       return;
     }
-    const list = categoriesSnapshot ?? categories;
-    const params = new URLSearchParams(location.search);
-    if (normalizedValue === 'all') {
-      if (!params.has('category')) return;
-      params.delete('category');
-    } else {
-      const match = list.find(cat => String(cat.id) === normalizedValue);
-      if (!match) return;
-      const slug = toSlug(match.slug ?? match.raw?.slug ?? match.name);
-      if (!slug) return;
-      if (toSlug(params.get('category')) === slug) return;
-      params.set('category', slug);
+
+    if (brandId !== 'all') {
+      const match = brandOptions.find(option => String(option.id) === String(brandId));
+      if (!match) {
+        setBrandSelection('all', { brandSnapshot: brandOptions });
+      } else {
+        initialBrandIdRef.current = match.id;
+        initialBrandNameRef.current = match.name;
+        initialBrandSlugRef.current = match.slug ?? toSlug(match.name);
+        initialBrandHydratedRef.current = true;
+      }
+      return;
     }
-    const qs = params.toString();
-    navigate(`${location.pathname}${qs ? `?${qs}` : ''}`, { replace: true });
-  }
+
+    if (initialBrandHydratedRef.current) return;
+
+    if (initialBrandIdRef.current) {
+      const byId = brandOptions.find(option => String(option.id) === String(initialBrandIdRef.current));
+      if (byId) {
+        setBrandSelection(String(byId.id), {
+          fromUrl: true,
+          brandSnapshot: brandOptions,
+          brandName: byId.name,
+          brandSlug: byId.slug ?? toSlug(byId.name)
+        });
+        initialBrandHydratedRef.current = true;
+        return;
+      }
+    }
+
+    if (initialBrandSlugRef.current) {
+      const bySlug = brandOptions.find(option => toSlug(option.slug ?? option.name) === initialBrandSlugRef.current);
+      if (bySlug) {
+        setBrandSelection(String(bySlug.id), {
+          fromUrl: true,
+          brandSnapshot: brandOptions,
+          brandName: bySlug.name,
+          brandSlug: bySlug.slug ?? toSlug(bySlug.name)
+        });
+      }
+    }
+    initialBrandHydratedRef.current = true;
+  }, [brandOptions, brandId, brandLoading, setBrandSelection]);
+
+  useEffect(() => {
+    if (Array.isArray(brandOptionsByCategory[ALL_CATEGORY_KEY]) || fetchingBrandKeysRef.current.has(ALL_CATEGORY_KEY)) {
+      return;
+    }
+
+    let cancelled = false;
+    fetchingBrandKeysRef.current.add(ALL_CATEGORY_KEY);
+    setBrandLoading(true);
+
+    (async () => {
+      let options = [];
+      try {
+        const response = await api.brands.list({ active: true, limit: 200 });
+        options = normalizeBrandOptions(response);
+      } catch {
+        options = [];
+      }
+
+      if (!cancelled) {
+        setBrandOptionsByCategory(prev => ({ ...prev, [ALL_CATEGORY_KEY]: options }));
+      }
+
+      fetchingBrandKeysRef.current.delete(ALL_CATEGORY_KEY);
+      if (!cancelled && fetchingBrandKeysRef.current.size === 0) {
+        setBrandLoading(false);
+      } else if (fetchingBrandKeysRef.current.size === 0) {
+        setBrandLoading(false);
+      }
+    })();
+
+    return () => {
+      cancelled = true;
+    };
+  }, [brandOptionsByCategory]);
+
+  useEffect(() => {
+    if (categoryId === 'all' || categoryId == null) {
+      return;
+    }
+
+    const key = String(categoryId);
+    if (Array.isArray(brandOptionsByCategory[key]) || fetchingBrandKeysRef.current.has(key)) {
+      return;
+    }
+
+    let cancelled = false;
+    fetchingBrandKeysRef.current.add(key);
+    setBrandLoading(true);
+
+    const params = { active: true, limit: 200, categoryId: categoryId };
+
+    (async () => {
+      let options = [];
+      try {
+        const response = await api.brands.list(params);
+        options = normalizeBrandOptions(response);
+      } catch {
+        options = [];
+      }
+
+      if (!cancelled) {
+        setBrandOptionsByCategory(prev => ({ ...prev, [key]: options }));
+      }
+
+      fetchingBrandKeysRef.current.delete(key);
+      if (!cancelled && fetchingBrandKeysRef.current.size === 0) {
+        setBrandLoading(false);
+      } else if (fetchingBrandKeysRef.current.size === 0) {
+        setBrandLoading(false);
+      }
+    })();
+
+    return () => {
+      cancelled = true;
+    };
+  }, [categoryId, brandOptionsByCategory]);
+
+
 
   function handlePriceChange(r) { setPriceRange(r); }
 
@@ -454,10 +739,14 @@ export default function Products() {
     setCategorySelection(event.target.value);
   }
 
+  function handleBrandSelect(event) {
+    setBrandSelection(event.target.value);
+  }
+
   function resetFilters() {
     setQuery('');
-    setBrand('');
     setCategorySelection('all');
+    setBrandSelection('all');
     setInStockOnly(false);
     setPriceRange({ ...sliderBounds });
     setCollectionTitle('');
@@ -467,6 +756,8 @@ export default function Products() {
       state: {
         query: '',
         brand: '',
+        brandId: null,
+        brandSlug: null,
         categoryId: null,
         categorySlug: null,
         inStock: false,
@@ -477,9 +768,10 @@ export default function Products() {
     });
     navigate(location.pathname, { replace: false });
   }
+
   const activeFilterCount = (
     (query ? 1 : 0) +
-    (brand.trim() ? 1 : 0) +
+    (brandId !== 'all' ? 1 : 0) +
     (categoryId !== 'all' ? 1 : 0) +
     (inStockOnly ? 1 : 0) +
     (priceRange.min !== sliderBounds.min ? 1 : 0) +
@@ -518,7 +810,22 @@ export default function Products() {
         </div>
         <div className="col-6 col-md-3 col-lg-2">
           <label className="form-label small text-muted" htmlFor="filterBrand">Brand</label>
-          <input id="filterBrand" type="text" className="form-control" placeholder="Any" value={brand} onChange={e=>setBrand(e.target.value)} />
+          <select
+            id="filterBrand"
+            className="form-select form-select-sm"
+            value={brandId}
+            onChange={handleBrandSelect}
+            disabled={brandLoading || (categoryId !== 'all' && !brandLoading && brandOptions.length === 0)}
+          >
+            <option value="all">All brands</option>
+            {brandOptions.map(option => (
+              <option key={option.id} value={option.id}>{option.name}</option>
+            ))}
+          </select>
+          {brandLoading && <small className="form-text text-muted">Loading brands…</small>}
+          {!brandLoading && categoryId !== 'all' && brandOptions.length === 0 && (
+            <small className="form-text text-muted">No brands linked to this category yet.</small>
+          )}
         </div>
         <div className="col-6 col-md-3 col-lg-2">
           <label className="form-label small text-muted" htmlFor="filterCategory">Category</label>

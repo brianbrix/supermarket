@@ -8,10 +8,26 @@ class ProductResource extends JsonResource
 {
     public function toArray($request): array
     {
+        $brandRelation = $this->relationLoaded('brand') ? $this->getRelation('brand') : null;
+        $brandName = $brandRelation?->name;
+        $brandSlug = $brandRelation?->slug;
+
+        if (!$brandName) {
+            if (is_array($this->brand)) {
+                $brandName = $this->brand['name'] ?? null;
+                $brandSlug = $brandSlug ?? ($this->brand['slug'] ?? null);
+            } elseif (is_string($this->brand)) {
+                $brandName = $this->brand;
+            }
+        }
+
         return [
             'id' => $this->id,
             'name' => $this->name,
-            'brand' => $this->brand,
+            'brand' => $brandName,
+            'brandId' => $this->brand_id,
+            'brandName' => $brandName,
+            'brandSlug' => $brandSlug,
             'description' => $this->description,
             'price' => (float)$this->price,
             'stock' => $this->stock,

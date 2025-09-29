@@ -14,7 +14,7 @@ class Product extends Model
     use HasApiTokens, HasFactory;
 
     protected $fillable = [
-        'name','brand','description','price','stock','unit','category_id','image_url'
+        'name','brand','brand_id','description','price','stock','unit','category_id','image_url'
     ];
 
     protected $casts = [
@@ -28,6 +28,11 @@ class Product extends Model
 
     public function category() {
         return $this->belongsTo(Category::class);
+    }
+
+    public function brand()
+    {
+        return $this->belongsTo(Brand::class);
     }
 
     public function images() {

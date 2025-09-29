@@ -1,4 +1,5 @@
-import { createContext, useContext, useEffect, useState } from 'react';
+import { createContext, useContext, useEffect, useMemo, useState } from 'react';
+import { DEFAULT_STORE_THEME, normalizeStoreTheme } from '../config/storeThemes.js';
 
 const ThemeContext = createContext();
 
@@ -31,6 +32,22 @@ function initialThemeState(prefersDark) {
 export function ThemeProvider({ children }) {
   const prefersDark = typeof window !== 'undefined' && window.matchMedia && window.matchMedia('(prefers-color-scheme: dark)').matches;
   const [themeState, setThemeState] = useState(() => initialThemeState(prefersDark));
+  const [storeTheme, setStoreThemeState] = useState(() => {
+    try {
+      const stored = typeof window !== 'undefined' ? window.localStorage.getItem('storeTheme') : null;
+      return normalizeStoreTheme(stored || DEFAULT_STORE_THEME);
+    } catch {
+      return DEFAULT_STORE_THEME;
+    }
+  });
+  const [storeThemeSource, setStoreThemeSource] = useState(() => {
+    try {
+      const stored = typeof window !== 'undefined' ? window.localStorage.getItem('storeTheme_source') : null;
+      return stored || 'layout';
+    } catch {
+      return 'layout';
+    }
+  });
 
   useEffect(() => {
     try {
@@ -41,6 +58,16 @@ export function ThemeProvider({ children }) {
     document.documentElement.setAttribute('data-bs-theme', themeState.value);
     document.body?.setAttribute('data-bs-theme', themeState.value);
   }, [themeState.value, themeState.source]);
+
+  useEffect(() => {
+    try {
+      window.localStorage.setItem('storeTheme', storeTheme);
+      window.localStorage.setItem('storeTheme_source', storeThemeSource);
+    } catch {
+      /* ignore */
+    }
+    document.documentElement.setAttribute('data-store-theme', storeTheme);
+  }, [storeTheme, storeThemeSource]);
 
   function applyTheme(value, source = 'nav') {
     const normalizedValue = normalizeTheme(value);
@@ -68,8 +95,25 @@ export function ThemeProvider({ children }) {
     applyTheme(value, source);
   }
 
+  const applyStoreTheme = (value, source = 'layout') => {
+    const normalizedValue = normalizeStoreTheme(value);
+    const normalizedSource = source || 'layout';
+    setStoreThemeState(prev => (prev === normalizedValue ? prev : normalizedValue));
+    setStoreThemeSource(prev => (prev === normalizedSource ? prev : normalizedSource));
+  };
+
+  const contextValue = useMemo(() => ({
+    theme: themeState.value,
+    themeSource: themeState.source,
+    toggleTheme,
+    setTheme,
+    storeTheme,
+    storeThemeSource,
+    setStoreTheme: applyStoreTheme
+  }), [themeState.value, themeState.source, storeTheme, storeThemeSource]);
+
   return (
-    <ThemeContext.Provider value={{ theme: themeState.value, themeSource: themeState.source, toggleTheme, setTheme }}>
+    <ThemeContext.Provider value={contextValue}>
       {children}
     </ThemeContext.Provider>
   );

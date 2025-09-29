@@ -4,6 +4,7 @@ import PaginationBar from '../../components/PaginationBar.jsx';
 import { api } from '../../services/api.js';
 import { useToast } from '../../context/ToastContext.jsx';
 import SectionRenderer, { clamp } from '../../components/homepage/SectionRenderer.jsx';
+import { STORE_THEMES, STORE_THEME_KEYS, DEFAULT_STORE_THEME, normalizeStoreTheme } from '../../config/storeThemes.js';
 
 const defaultPageMeta = {
   page: 0,
@@ -152,6 +153,7 @@ const SECTION_LIBRARY = {
     template: () => ({
       id: `hero-${Date.now()}`,
       type: 'hero',
+      style: 'classic-fresh',
       headline: 'Headline',
       subheading: 'Subheading',
       backgroundImage: null,
@@ -181,6 +183,7 @@ const SECTION_LIBRARY = {
     template: () => ({
       id: `cat-grid-${Date.now()}`,
       type: 'category-grid',
+      style: 'fresh-canopy',
       title: 'Shop by category',
       subtitle: 'Popular aisles curated for you.',
       columns: 4,
@@ -196,6 +199,7 @@ const SECTION_LIBRARY = {
     template: () => ({
       id: `carousel-${Date.now()}`,
       type: 'product-carousel',
+      style: 'classic',
       title: 'Personalised picks',
       dataSource: {
         type: 'dynamic',
@@ -235,6 +239,7 @@ const SECTION_LIBRARY = {
     template: () => ({
       id: `rich-${Date.now()}`,
       type: 'rich-text',
+      style: 'calm-paper',
       title: 'Why shoppers love us',
       body: [
         { type: 'paragraph', content: 'We combine curated products, unbeatable freshness, and delightful delivery.' }
@@ -257,6 +262,32 @@ const PROMO_STRIP_THEME_OPTIONS = [
   { value: 'candy-crush', label: 'Candy crush (crimson → amber)' },
   { value: 'forest-lights', label: 'Forest lights (emerald → mint)' },
   { value: 'nordic-spark', label: 'Nordic spark (icy blue → silver)' }
+];
+
+const HERO_THEME_OPTIONS = [
+  { value: 'classic-fresh', label: 'Classic fresh greens' },
+  { value: 'sunrise-citrus', label: 'Sunrise citrus glow' },
+  { value: 'aqua-mist', label: 'Aqua mist' },
+  { value: 'midnight-bloom', label: 'Midnight bloom' }
+];
+
+const CATEGORY_GRID_THEME_OPTIONS = [
+  { value: 'fresh-canopy', label: 'Fresh canopy' },
+  { value: 'sunset-horizon', label: 'Sunset horizon' },
+  { value: 'midnight-velvet', label: 'Midnight velvet' }
+];
+
+const CAROUSEL_THEME_OPTIONS = [
+  { value: 'classic', label: 'Classic minimal' },
+  { value: 'glass-emerald', label: 'Glass emerald' },
+  { value: 'sunset-candy', label: 'Sunset candy' },
+  { value: 'midnight-luxe', label: 'Midnight luxe' }
+];
+
+const RICH_TEXT_THEME_OPTIONS = [
+  { value: 'calm-paper', label: 'Calm paper' },
+  { value: 'sunset-quartz', label: 'Sunset quartz' },
+  { value: 'nocturne', label: 'Nocturne' }
 ];
 
 const clone = (value) => JSON.parse(JSON.stringify(value));
@@ -800,12 +831,18 @@ export default function AdminHomepage() {
                     </select>
                   </div>
                   <div className="col-12 col-md-3">
-                    <label className="form-label" htmlFor="layoutThemeSelect">Theme</label>
-                    <select id="layoutThemeSelect" className="form-select" value={draft.meta?.theme || 'light'} onChange={e => handleMetaChange('theme', e.target.value)}>
-                      <option value="light">Light</option>
-                      <option value="dark">Dark</option>
+                    <label className="form-label" htmlFor="layoutThemeSelect">Experience theme</label>
+                    <select
+                      id="layoutThemeSelect"
+                      className="form-select"
+                      value={normalizeStoreTheme(draft.meta?.theme || DEFAULT_STORE_THEME)}
+                      onChange={e => handleMetaChange('theme', e.target.value)}
+                    >
+                      {STORE_THEME_KEYS.map((key) => (
+                        <option key={key} value={key}>{STORE_THEMES[key].label}</option>
+                      ))}
                     </select>
-                    <div className="form-text">Used by storefront for styling.</div>
+                    <div className="form-text">Determines homepage palette and matching product experience.</div>
                   </div>
                 </div>
 
@@ -848,21 +885,29 @@ export default function AdminHomepage() {
                   <div className="border border-dashed rounded p-3 text-center text-muted small">No sections yet. Use “Add section…” to start building.</div>
                 ) : (
                   <div className="vstack gap-3">
-                    {sections.map((section, idx) => (
-                      <SectionEditor
-                        key={section.id || `${section.type}-${idx}`}
-                        section={section}
-                        index={idx}
-                        total={sections.length}
-                        onChange={nextSection => handleSectionChange(idx, nextSection)}
-                        onMove={(direction) => handleMoveSection(idx, direction)}
-                        onRemove={() => handleRemoveSection(idx)}
-                        storeName={draft.meta?.storeName || draft.meta?.brandName || PREVIEW_STORE_NAME}
-                        theme={draft.meta?.theme || 'light'}
-                        tagOptions={tagOptions}
-                        categoryOptions={categoryOptions}
-                      />
-                    ))}
+                    {sections.map((section, idx) => {
+                      const experienceKey = normalizeStoreTheme(draft.meta?.theme || DEFAULT_STORE_THEME);
+                      const previewThemeMode = draft.meta?.mode === 'dark'
+                        ? 'dark'
+                        : (STORE_THEMES[experienceKey]?.mode === 'dark' ? 'dark' : 'light');
+                      const previewStoreName = draft.meta?.storeName || draft.meta?.brandName || PREVIEW_STORE_NAME;
+                      return (
+                        <SectionEditor
+                          key={section.id || `${section.type}-${idx}`}
+                          section={section}
+                          index={idx}
+                          total={sections.length}
+                          onChange={nextSection => handleSectionChange(idx, nextSection)}
+                          onMove={(direction) => handleMoveSection(idx, direction)}
+                          onRemove={() => handleRemoveSection(idx)}
+                          storeName={previewStoreName}
+                          themeMode={previewThemeMode}
+                          experienceTheme={experienceKey}
+                          tagOptions={tagOptions}
+                          categoryOptions={categoryOptions}
+                        />
+                      );
+                    })}
                   </div>
                 )}
               </div>
@@ -874,7 +919,7 @@ export default function AdminHomepage() {
   );
 }
 
-function SectionEditor({ section, index, total, onChange, onMove, onRemove, storeName, theme, tagOptions = [], categoryOptions = [] }) {
+function SectionEditor({ section, index, total, onChange, onMove, onRemove, storeName, themeMode = 'light', experienceTheme = DEFAULT_STORE_THEME, tagOptions = [], categoryOptions = [] }) {
   const [showAdvanced, setShowAdvanced] = useState(false);
 
   const headerLabel = SECTION_LIBRARY[section.type]?.label || (section.type ? section.type : `Section ${index + 1}`);
@@ -884,7 +929,8 @@ function SectionEditor({ section, index, total, onChange, onMove, onRemove, stor
   const errorIssues = validation.issues.filter(issue => issue.severity === 'error');
   const warningIssues = validation.issues.filter(issue => issue.severity === 'warning');
   const previewStoreName = storeName || PREVIEW_STORE_NAME;
-  const previewTheme = theme || 'light';
+  const previewThemeMode = themeMode === 'dark' ? 'dark' : 'light';
+  const previewExperienceTheme = normalizeStoreTheme(experienceTheme || DEFAULT_STORE_THEME);
   const previewData = useMemo(() => {
     if (section.type === 'product-carousel') {
       return { items: buildPreviewProductItems(section), loading: false, error: null };
@@ -972,7 +1018,13 @@ function SectionEditor({ section, index, total, onChange, onMove, onRemove, stor
         </div>
       )}
 
-      <SectionLivePreview section={section} storeName={previewStoreName} theme={previewTheme} data={previewData} />
+      <SectionLivePreview
+        section={section}
+        storeName={previewStoreName}
+        themeMode={previewThemeMode}
+        experienceTheme={previewExperienceTheme}
+        data={previewData}
+      />
 
       <div className="mt-3">
         <button type="button" className="btn btn-link p-0" onClick={() => setShowAdvanced(open => !open)}>
@@ -1005,6 +1057,21 @@ function HeroSectionEditor({ value, onChange, errors = {} }) {
 
   return (
     <div className="row g-3">
+      <div className="col-12 col-md-4">
+        <label className="form-label" htmlFor={`hero-style-${value.id}`}>Theme</label>
+        <select
+          id={`hero-style-${value.id}`}
+          className="form-select"
+          value={value.style || 'classic-fresh'}
+          onChange={e => update('style', e.target.value)}
+        >
+          {HERO_THEME_OPTIONS.map(option => (
+            <option key={option.value} value={option.value}>{option.label}</option>
+          ))}
+        </select>
+        {errors.style && <div className="invalid-feedback d-block">{errors.style}</div>}
+        <div className="form-text">Switch background palette and CTA styling.</div>
+      </div>
       <div className="col-12">
         <label className="form-label" htmlFor={`hero-headline-${value.id}`}>Headline</label>
         <input id={`hero-headline-${value.id}`} className="form-control" value={value.headline || ''} onChange={e => update('headline', e.target.value)} placeholder="Big promise text" />
@@ -1052,17 +1119,24 @@ function HeroSectionEditor({ value, onChange, errors = {} }) {
   );
 }
 
-function SectionLivePreview({ section, storeName, theme, data }) {
+function SectionLivePreview({ section, storeName, themeMode = 'light', experienceTheme = DEFAULT_STORE_THEME, data }) {
   if (!section) return null;
+  const experienceKey = normalizeStoreTheme(experienceTheme || DEFAULT_STORE_THEME);
   return (
     <div className="mt-4">
       <div className="d-flex justify-content-between align-items-center mb-2">
         <strong className="small text-uppercase text-muted">Live preview</strong>
         <span className="badge text-bg-light text-secondary text-uppercase">{section.type}</span>
       </div>
-      <div className="border rounded bg-body-tertiary">
+      <div className="border rounded bg-body-tertiary" data-store-theme={experienceKey}>
         <div className="section-preview-surface" style={{ pointerEvents: 'none' }}>
-          <SectionRenderer section={section} storeName={storeName} theme={theme} data={data} />
+          <SectionRenderer
+            section={section}
+            storeName={storeName}
+            theme={themeMode}
+            data={data}
+            experienceTheme={experienceKey}
+          />
         </div>
       </div>
     </div>
@@ -1135,6 +1209,23 @@ function CategoryGridSectionEditor({ value, onChange, errors = {}, categoryOptio
 
   return (
     <div className="vstack gap-3">
+      <div className="row g-3">
+        <div className="col-12 col-md-4">
+          <label className="form-label" htmlFor={`category-style-${value.id}`}>Theme</label>
+          <select
+            id={`category-style-${value.id}`}
+            className="form-select"
+            value={value.style || 'fresh-canopy'}
+            onChange={e => update('style', e.target.value)}
+          >
+            {CATEGORY_GRID_THEME_OPTIONS.map(option => (
+              <option key={option.value} value={option.value}>{option.label}</option>
+            ))}
+          </select>
+          {errors.style && <div className="invalid-feedback d-block">{errors.style}</div>}
+          <div className="form-text">Tweaks gradient accents and card styling.</div>
+        </div>
+      </div>
       <div className="row g-3">
         <div className="col-12 col-md-6">
           <label className="form-label" htmlFor={`category-title-${value.id}`}>Section title</label>
@@ -1227,6 +1318,20 @@ function ProductCarouselSectionEditor({ value, onChange, tagOptions = [] }) {
   return (
     <div className="vstack gap-3">
       <div className="row g-3">
+        <div className="col-12 col-md-4">
+          <label className="form-label" htmlFor={`carousel-style-${value.id}`}>Theme</label>
+          <select
+            id={`carousel-style-${value.id}`}
+            className="form-select"
+            value={value.style || 'classic'}
+            onChange={e => update('style', e.target.value)}
+          >
+            {CAROUSEL_THEME_OPTIONS.map(option => (
+              <option key={option.value} value={option.value}>{option.label}</option>
+            ))}
+          </select>
+          <div className="form-text">Controls card surfaces and badge colors.</div>
+        </div>
         <div className="col-12 col-md-6">
           <label className="form-label" htmlFor={`carousel-title-${value.id}`}>Title</label>
           <input id={`carousel-title-${value.id}`} className="form-control" value={value.title || ''} onChange={e => update('title', e.target.value)} />
@@ -1573,6 +1678,22 @@ function RichTextSectionEditor({ value, onChange }) {
 
   return (
     <div className="vstack gap-3">
+      <div className="row g-3">
+        <div className="col-12 col-md-4">
+          <label className="form-label" htmlFor={`rich-style-${value.id}`}>Theme</label>
+          <select
+            id={`rich-style-${value.id}`}
+            className="form-select"
+            value={value.style || 'calm-paper'}
+            onChange={e => update('style', e.target.value)}
+          >
+            {RICH_TEXT_THEME_OPTIONS.map(option => (
+              <option key={option.value} value={option.value}>{option.label}</option>
+            ))}
+          </select>
+          <div className="form-text">Updates typography scale and accents.</div>
+        </div>
+      </div>
       <div className="row g-3">
         <div className="col-12 col-md-6">
           <label className="form-label" htmlFor={`rich-title-${value.id}`}>Title</label>

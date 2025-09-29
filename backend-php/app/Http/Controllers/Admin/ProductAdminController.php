@@ -8,13 +8,14 @@ use Illuminate\Http\Request;
 use Illuminate\Support\Arr;
 use Illuminate\Support\Str;
 use App\Models\ProductTag;
+use App\Models\Brand;
 
 class ProductAdminController extends Controller
 {
     public function index(Request $request)
     {
         // Eager load images so admin UI can render thumbnails / reorder without extra round-trips.
-    $query = Product::query()->with(['category', 'images', 'tags']);
+        $query = Product::query()->with(['category', 'images', 'tags', 'brand']);
         if ($search = $request->query('q')) {
             $query->where(function ($q) use ($search) {
                 $like = '%' . addcslashes($search, '%_') . '%';
@@ -25,7 +26,15 @@ class ProductAdminController extends Controller
         }
         if ($request->filled('brand')) {
             $brand = '%' . addcslashes($request->query('brand'), '%_') . '%';
-            $query->where('brand', 'like', $brand);
+            $query->where(function ($scope) use ($brand) {
+                $scope->where('brand', 'like', $brand)
+                    ->orWhereHas('brand', function ($q) use ($brand) {
+                        $q->where('name', 'like', $brand);
+                    });
+            });
+        }
+        if ($request->filled('brandId')) {
+            $query->where('brand_id', (int) $request->query('brandId'));
         }
         $sort = $request->query('sort', 'id');
         $direction = strtolower($request->query('direction', 'desc')) === 'asc' ? 'asc' : 'desc';
@@ -58,6 +67,7 @@ class ProductAdminController extends Controller
         $data = $request->validate([
             'name' => ['required','string','max:255'],
             'brand' => ['nullable','string','max:120'],
+            'brand_id' => ['nullable','integer','exists:brands,id'],
             'description' => ['nullable','string'],
             'price' => ['required','numeric','min:0'],
             'stock' => ['required','integer','min:0'],
@@ -65,11 +75,13 @@ class ProductAdminController extends Controller
             'category_id' => ['nullable','integer','exists:categories,id'],
             'image_url' => ['nullable','string','max:500'],
         ]);
-    $product = Product::create($data);
-    $this->syncProductTags($product, $request);
-    $product->load(['category', 'images', 'tags']);
+        $normalized = $this->normalizeBrandPayload($data);
+        $product = Product::create($normalized);
+        $this->syncProductTags($product, $request);
+        $product->load(['category', 'images', 'tags', 'brand']);
+        $this->syncBrandCategoryPivot($product);
 
-    return response()->json($this->transformProduct($product), 201);
+        return response()->json($this->transformProduct($product), 201);
     }
 
     public function update(Request $request, Product $product)
@@ -77,6 +89,7 @@ class ProductAdminController extends Controller
         $data = $request->validate([
             'name' => ['sometimes','string','max:255'],
             'brand' => ['sometimes','nullable','string','max:120'],
+            'brand_id' => ['sometimes','nullable','integer','exists:brands,id'],
             'description' => ['sometimes','nullable','string'],
             'price' => ['sometimes','numeric','min:0'],
             'stock' => ['sometimes','integer','min:0'],
@@ -84,11 +97,13 @@ class ProductAdminController extends Controller
             'category_id' => ['sometimes','nullable','integer','exists:categories,id'],
             'image_url' => ['sometimes','nullable','string','max:500'],
         ]);
-    $product->update($data);
-    $this->syncProductTags($product, $request);
-    $product->load(['category', 'images', 'tags']);
+        $normalized = $this->normalizeBrandPayload($data, $product);
+        $product->update($normalized);
+        $this->syncProductTags($product, $request);
+        $product->load(['category', 'images', 'tags', 'brand']);
+        $this->syncBrandCategoryPivot($product);
 
-    return response()->json($this->transformProduct($product));
+        return response()->json($this->transformProduct($product));
     }
 
     public function destroy(Product $product)
@@ -116,10 +131,21 @@ class ProductAdminController extends Controller
             ];
         })->values()->all() : [];
 
+        $brandModel = null;
+        if ($product->relationLoaded('brand')) {
+            $relation = $product->getRelation('brand');
+            if ($relation instanceof Brand) {
+                $brandModel = $relation;
+            }
+        }
+
         return [
             'id' => $product->id,
             'name' => $product->name,
             'brand' => $product->brand,
+            'brandId' => $product->brand_id,
+            'brandName' => $brandModel?->name ?? $product->brand,
+            'brandSlug' => $brandModel?->slug,
             'description' => $product->description,
             'price' => $product->price,
             'stock' => $product->stock,
@@ -133,6 +159,43 @@ class ProductAdminController extends Controller
             'createdAt' => $product->created_at?->toIso8601String(),
             'updatedAt' => $product->updated_at?->toIso8601String(),
         ];
+    }
+
+    private function normalizeBrandPayload(array $data, ?Product $existing = null): array
+    {
+        if (array_key_exists('brand_id', $data)) {
+            $brandId = $data['brand_id'];
+            if ($brandId) {
+                $brand = Brand::find($brandId);
+                if ($brand) {
+                    $data['brand'] = $brand->name;
+                }
+            } else {
+                $data['brand_id'] = null;
+            }
+        } elseif ($existing) {
+            $data['brand_id'] = $existing->brand_id;
+        }
+
+        if (array_key_exists('brand', $data) && $data['brand'] !== null) {
+            $data['brand'] = trim((string) $data['brand']);
+        }
+
+        return $data;
+    }
+
+    private function syncBrandCategoryPivot(Product $product): void
+    {
+        if (!$product->brand_id || !$product->category_id) {
+            return;
+        }
+
+        $brand = $product->relationLoaded('brand') ? $product->brand : Brand::find($product->brand_id);
+        if (!$brand) {
+            return;
+        }
+
+        $brand->categories()->syncWithoutDetaching([$product->category_id]);
     }
 
     private function syncProductTags(Product $product, Request $request): void

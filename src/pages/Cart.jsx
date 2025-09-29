@@ -1,6 +1,7 @@
 import { useCart } from '../context/CartContext.jsx';
 import { useCurrencyFormatter } from '../context/SettingsContext.jsx';
 import { useNavigate, Link } from 'react-router-dom';
+import { useTheme } from '../context/ThemeContext.jsx';
 import QuantityStepper from '../components/QuantityStepper.jsx';
 import CouponBox from '../components/CouponBox.jsx';
 
@@ -9,8 +10,9 @@ export default function Cart() {
   const formatCurrency = useCurrencyFormatter();
   const formatAmount = formatCurrency;
   const navigate = useNavigate();
+  const { storeTheme } = useTheme();
   if (!items.length) return (
-    <section className="container py-4">
+    <section className="container py-4" data-store-theme={storeTheme}>
       <h1 className="h3 mb-3">Cart</h1>
       <div className="card p-4 border-0 shadow-sm bg-body-secondary-subtle">
         <p className="mb-3">Your cart is empty.</p>
@@ -22,7 +24,7 @@ export default function Cart() {
     </section>
   );
   return (
-    <section className="container py-4">
+    <section className="container py-4" data-store-theme={storeTheme}>
       <div className="d-flex flex-column flex-sm-row align-items-sm-center gap-3 mb-3">
         <h1 className="h3 mb-0">Cart</h1>
         <button onClick={clearCart} className="btn btn-outline-danger btn-sm ms-sm-auto" aria-label="Clear all items from cart">Clear cart</button>

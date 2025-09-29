@@ -30,6 +30,8 @@ use App\Http\Controllers\Admin\DeliveryAdminController;
 use App\Http\Controllers\Admin\HomepageLayoutAdminController;
 use App\Http\Controllers\API\HomepageLayoutController;
 use App\Http\Controllers\Admin\ProductTagAdminController;
+use App\Http\Controllers\API\BrandController;
+use App\Http\Controllers\Admin\BrandAdminController;
 
 Route::get('/products', [ProductController::class, 'index']);
 Route::get('/products/price-range', [ProductController::class, 'priceRange']);
@@ -41,6 +43,7 @@ Route::get('/products/{product}/ratings/summary', [ProductRatingController::clas
 Route::post('/products/{product}/ratings', [ProductRatingController::class, 'store'])->whereNumber('product')->middleware('throttle:product-ratings');
 Route::get('/products/category/{category}', [ProductController::class, 'byCategory']);
 Route::get('/categories', [CategoryController::class, 'index']);
+Route::get('/brands', [BrandController::class, 'index']);
 Route::get('/homepage', [HomepageLayoutController::class, 'show']);
 Route::get('/homepage/{slug}', [HomepageLayoutController::class, 'show']);
 // Orders (public/user scope – authenticated user association optional)
@@ -141,6 +144,11 @@ Route::middleware(['auth:sanctum','role:ADMIN'])->prefix('admin')->group(functio
     Route::post('/categories', [CategoryController::class, 'store']);
     Route::put('/categories/{category}', [CategoryController::class, 'update']);
     Route::delete('/categories/{category}', [CategoryController::class, 'destroy']);
+
+    Route::get('/brands', [BrandAdminController::class, 'index']);
+    Route::post('/brands', [BrandAdminController::class, 'store']);
+    Route::put('/brands/{brand}', [BrandAdminController::class, 'update']);
+    Route::delete('/brands/{brand}', [BrandAdminController::class, 'destroy']);
 
     Route::get('/product-tags', [ProductTagAdminController::class, 'index']);
     Route::post('/product-tags', [ProductTagAdminController::class, 'store']);
