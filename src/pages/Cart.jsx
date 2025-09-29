@@ -37,7 +37,10 @@ export default function Cart() {
             <tbody>
               {items.map(i => (
                 <tr key={i.id}>
-                  <td className="fw-semibold">{i.name}</td>
+                  <td className="fw-semibold">
+                    {i.name}
+                    {i.brand && <div className="text-muted small text-uppercase">{i.brand}</div>}
+                  </td>
                   <td>
                     <QuantityStepper size="sm" value={i.qty} onChange={q=>updateQty(i.id, q)} ariaLabel={`Quantity for ${i.name}`} />
                   </td>
@@ -64,6 +67,7 @@ export default function Cart() {
                 <i className="bi bi-trash"></i>
               </button>
             </div>
+          {i.brand && <div className="text-muted text-uppercase small">{i.brand}</div>}
             <div className="cart-item-card__meta">
               <span>{formatAmount(i.price)}{i.unit ? <span className="text-secondary">/{i.unit}</span> : null}</span>
               <span>In cart: {i.qty}</span>

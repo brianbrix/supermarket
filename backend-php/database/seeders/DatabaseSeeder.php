@@ -17,7 +17,9 @@ class DatabaseSeeder extends Seeder
             PaymentOptionSeeder::class,
             CouponSeeder::class,
             ProductSeeder::class,
+            ProductTagSeeder::class,
             DeliveryShopSeeder::class,
+            HomepageLayoutSeeder::class,
             OrderSeeder::class,
         ]);
     }

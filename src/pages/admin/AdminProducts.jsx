@@ -1,9 +1,11 @@
-import { useEffect, useState, useRef } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
+import { Link } from 'react-router-dom';
 import { api, mapProductResponse } from '../../services/api.js';
 import FilterBar from '../../components/FilterBar.jsx';
 import PaginationBar from '../../components/PaginationBar.jsx';
+import Select from 'react-select';
 
-const makeEmptyForm = () => ({ name: '', categoryId: '', price: '', description: '', stock: '0', unit: '' });
+const makeEmptyForm = () => ({ name: '', brand: '', categoryId: '', price: '', description: '', stock: '0', unit: '', tagSlugs: [] });
 
 export default function AdminProducts() {
   const [products, setProducts] = useState([]);
@@ -13,22 +15,48 @@ export default function AdminProducts() {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(null);
   const [form, setForm] = useState(makeEmptyForm);
-  const [imageFile, setImageFile] = useState(null); // legacy single upload (kept for backward compatibility)
+  const [pendingImages, setPendingImages] = useState([]);
+  const [pendingPreviews, setPendingPreviews] = useState([]);
   const [multiUploading, setMultiUploading] = useState(false);
   const [multiError, setMultiError] = useState(null);
   const [search, setSearch] = useState('');
-  const [draftFilters, setDraftFilters] = useState({ categoryId:'', minPrice:'', maxPrice:'', inStock:'', sort:'name', direction:'asc' });
-  const [appliedFilters, setAppliedFilters] = useState({ categoryId:'', minPrice:'', maxPrice:'', inStock:'', sort:'name', direction:'asc' });
+  const [draftFilters, setDraftFilters] = useState({ brand:'', categoryId:'', minPrice:'', maxPrice:'', inStock:'', sort:'name', direction:'asc' });
+  const [appliedFilters, setAppliedFilters] = useState({ brand:'', categoryId:'', minPrice:'', maxPrice:'', inStock:'', sort:'name', direction:'asc' });
   const debounceRef = useRef();
   const firstDebounceRef = useRef(true); // skip the initial debounce which mirrors defaults
   const didInitialLoadRef = useRef(false); // guard StrictMode double invoke
   const categoriesLoadedRef = useRef(false); // ensure categories list fetched only once
   const [categories, setCategories] = useState([]);
+  const tagsLoadedRef = useRef(false); // ensure tags fetched only once
+  const [tags, setTags] = useState([]);
   const [submitting, setSubmitting] = useState(false);
   const [editingId, setEditingId] = useState(null);
+  const tagOptionsMemo = useMemo(() => {
+    return [...tags]
+      .map(tag => ({
+        value: tag.slug,
+        label: tag.name || tag.slug,
+        description: tag.description ?? ''
+      }))
+      .sort((a, b) => a.label.localeCompare(b.label));
+  }, [tags]);
+  const selectedTagOptions = useMemo(() => {
+    if (!Array.isArray(form.tagSlugs)) return [];
+    const slugs = form.tagSlugs.map(String);
+    const known = tagOptionsMemo.filter(option => slugs.includes(option.value));
+    const missing = slugs
+      .filter(slug => !known.some(option => option.value === slug))
+      .map(slug => ({ value: slug, label: `${slug} (inactive)` }));
+    return [...known, ...missing];
+  }, [form.tagSlugs, tagOptionsMemo]);
+  const selectMenuPortalTarget = typeof document !== 'undefined' ? document.body : undefined;
+
+  useEffect(() => () => {
+    pendingPreviews.forEach(url => URL.revokeObjectURL(url));
+  }, [pendingPreviews]);
   const resetFormState = () => {
     setForm(makeEmptyForm());
-    setImageFile(null);
+    clearPendingImages();
     setMultiError(null);
     setError(null);
   };
@@ -40,9 +68,11 @@ export default function AdminProducts() {
 
   function load(immediate=false) {
     if(!immediate) setLoading(true);
-    const { categoryId, minPrice, maxPrice, inStock, sort, direction } = appliedFilters;
+    const { brand, categoryId, minPrice, maxPrice, inStock, sort, direction } = appliedFilters;
+    const normalizedBrand = brand?.trim() || '';
     const payload = {
       ...(search? { q: search } : {}),
+      ...(normalizedBrand? { brand: normalizedBrand } : {}),
       ...(categoryId? { categoryId } : {}),
       ...(minPrice? { minPrice } : {}),
       ...(maxPrice? { maxPrice } : {}),
@@ -66,6 +96,13 @@ export default function AdminProducts() {
       .then(cats => setCategories(cats))
       .catch(e => setError(e.message));
   }, []);
+  useEffect(() => {
+    if (tagsLoadedRef.current) return;
+    tagsLoadedRef.current = true;
+    api.admin.productTags.list({ page: 0, size: 200 })
+      .then(res => setTags(res?.content ?? res ?? []))
+      .catch(e => setError(prev => prev ?? e.message));
+  }, []);
   // Load products when page or applied filters change, guard first StrictMode double invoke
   useEffect(() => {
     if (!didInitialLoadRef.current) {
@@ -81,10 +118,10 @@ export default function AdminProducts() {
     clearTimeout(debounceRef.current);
     debounceRef.current = setTimeout(()=>{ setAppliedFilters(p=>({ ...p, ...draftFilters })); setPage(0); }, 400);
     return ()=>clearTimeout(debounceRef.current);
-  }, [search, draftFilters.categoryId, draftFilters.minPrice, draftFilters.maxPrice, draftFilters.inStock]);
+  }, [search, draftFilters.brand, draftFilters.categoryId, draftFilters.minPrice, draftFilters.maxPrice, draftFilters.inStock]);
   function updateAdv(name,value){ setDraftFilters(f=>({...f,[name]:value})); }
   function applySort(e){ const [s,d]=e.target.value.split(':'); setDraftFilters(f=>({...f, sort:s, direction:d })); setAppliedFilters(a=>({...a, sort:s, direction:d })); setPage(0); load(true); }
-  function resetFilters(){ const base={ categoryId:'', minPrice:'', maxPrice:'', inStock:'', sort:'name', direction:'asc' }; setDraftFilters(base); setAppliedFilters(base); setSearch(''); setPage(0); load(true); }
+  function resetFilters(){ const base={ brand:'', categoryId:'', minPrice:'', maxPrice:'', inStock:'', sort:'name', direction:'asc' }; setDraftFilters(base); setAppliedFilters(base); setSearch(''); setPage(0); load(true); }
 
   function handleChange(e){
     const { name, value } = e.target;
@@ -102,13 +139,47 @@ export default function AdminProducts() {
     setMultiError(null);
     setForm({
       name: p.name || '',
+      brand: p.brand || '',
       categoryId: p.categoryId != null ? String(p.categoryId) : '',
       price: p.price != null ? String(p.price) : '',
       description: p.description || '',
       stock: p.stock != null ? String(p.stock) : '0',
-      unit: p.unit || ''
+      unit: p.unit || '',
+      tagSlugs: Array.isArray(p.tagSlugs)
+        ? p.tagSlugs.map(String)
+        : (Array.isArray(p.tags) ? p.tags.map(tag => tag?.slug).filter(Boolean).map(String) : [])
     });
-    setImageFile(null);
+    clearPendingImages();
+  }
+
+  function syncPendingPreviews(nextFiles) {
+    setPendingPreviews(prev => {
+      prev.forEach(url => URL.revokeObjectURL(url));
+      return nextFiles.map(file => URL.createObjectURL(file));
+    });
+  }
+
+  function handlePendingFiles(fileList) {
+    const incoming = Array.from(fileList ?? []).filter(Boolean);
+    if (incoming.length === 0) return;
+    setPendingImages(prev => {
+      const combined = [...prev, ...incoming].slice(0, 5);
+      syncPendingPreviews(combined);
+      return combined;
+    });
+  }
+
+  function removePendingImage(index) {
+    setPendingImages(prev => {
+      const next = prev.filter((_, i) => i !== index);
+      syncPendingPreviews(next);
+      return next;
+    });
+  }
+
+  function clearPendingImages() {
+    syncPendingPreviews([]);
+    setPendingImages([]);
   }
 
   async function handleSubmit(e){
@@ -131,12 +202,16 @@ export default function AdminProducts() {
       }
       const payload = {
         name: trimmedName,
+        brand: form.brand ? form.brand.trim() : null,
         category_id: categoryId,
         price: priceValue,
         description: form.description,
         image_url: null,
         stock: stockValue,
-        unit: form.unit ? form.unit.trim() : null
+        unit: form.unit ? form.unit.trim() : null,
+        tagSlugs: Array.isArray(form.tagSlugs)
+          ? form.tagSlugs.map(slug => String(slug).trim()).filter(Boolean)
+          : []
       };
       let created;
       if (editingId) {
@@ -144,8 +219,9 @@ export default function AdminProducts() {
       } else {
         created = await api.admin.products.create(payload);
       }
-      if (imageFile) {
-        await api.products.uploadImage(created.id, imageFile);
+      if (pendingImages.length > 0) {
+        await api.products.uploadImages(created.id, pendingImages);
+        clearPendingImages();
       }
       setEditingId(null);
       resetFormState();
@@ -164,7 +240,7 @@ export default function AdminProducts() {
 
   async function handleMultiUpload(fileList) {
     if (!editingId) return;
-    setMultiError(null);
+  setMultiError(null);
     const prod = products.find(p=>p.id===editingId);
     const existingCount = prod?.images?.length || 0;
     const allowed = Math.max(0, 5 - existingCount);
@@ -212,10 +288,13 @@ export default function AdminProducts() {
         <FilterBar.Field label="Search" width="col-12 col-md-3">
           <input type="search" className="form-control form-control-sm" placeholder="Name or description" value={search} onChange={e=>setSearch(e.target.value)} />
         </FilterBar.Field>
+        <FilterBar.Field label="Brand" width="col-6 col-md-2">
+          <input type="text" className="form-control form-control-sm" placeholder="e.g. Procter" value={draftFilters.brand} onChange={e=>updateAdv('brand', e.target.value)} />
+        </FilterBar.Field>
         <FilterBar.Field label="Category" width="col-6 col-md-2">
           <select className="form-select form-select-sm" value={draftFilters.categoryId} onChange={e=>updateAdv('categoryId', e.target.value)}>
             <option value="">All</option>
-            {categories.map(c=> <option key={c.id} value={c.id}>{c.name}</option>)}
+            {categories.map(c=> <option key={c.id} value={c.id}>{c.label ?? c.fullName ?? c.name}</option>)}
           </select>
         </FilterBar.Field>
         <FilterBar.Field label="Min" width="col-6 col-md-1">
@@ -235,6 +314,8 @@ export default function AdminProducts() {
           <select className="form-select form-select-sm" value={`${draftFilters.sort}:${draftFilters.direction}`} onChange={applySort}>
             <option value="name:asc">Name A→Z</option>
             <option value="name:desc">Name Z→A</option>
+            <option value="brand:asc">Brand A→Z</option>
+            <option value="brand:desc">Brand Z→A</option>
             <option value="price:asc">Price Low→High</option>
             <option value="price:desc">Price High→Low</option>
             <option value="stock:asc">Stock Low→High</option>
@@ -243,7 +324,7 @@ export default function AdminProducts() {
             <option value="id:desc">ID Desc</option>
           </select>
         </FilterBar.Field>
-  <FilterBar.Reset onClick={resetFilters} disabled={!search && !draftFilters.categoryId && !draftFilters.minPrice && !draftFilters.maxPrice && !draftFilters.inStock && draftFilters.sort==='name' && draftFilters.direction==='asc'} />
+  <FilterBar.Reset onClick={resetFilters} disabled={!search && !draftFilters.brand.trim() && !draftFilters.categoryId && !draftFilters.minPrice && !draftFilters.maxPrice && !draftFilters.inStock && draftFilters.sort==='name' && draftFilters.direction==='asc'} />
       </FilterBar>
       <div className="row">
         <div className="col-12 col-lg-7 mb-4 mb-lg-0">
@@ -252,14 +333,22 @@ export default function AdminProducts() {
               <table className="table table-sm align-middle">
                 <thead>
                   <tr>
-                    <th>Image</th><th>Name</th><th>Category</th><th>Price</th><th>Stock</th><th></th>
+                    <th>Image</th><th>Name</th><th>Brand</th><th>Category</th><th>Price</th><th>Stock</th><th></th>
                   </tr>
                 </thead>
                 <tbody>
                   {products.map(p => (
                     <tr key={p.id} className={p.stock === 0 ? 'table-warning' : ''}>
                       <td style={{width:'54px'}}>{p.image ? <img src={p.image} alt={p.name} style={{width:'48px', height:'48px', objectFit:'cover'}}/> : <span className="text-muted small">—</span>}</td>
-                      <td>{p.name}</td>
+                      <td>
+                        <div>{p.name}</div>
+                        {Array.isArray(p.tags) && p.tags.length > 0 && (
+                          <div className="text-muted small mt-1">
+                            Tags: {p.tags.map(tag => tag?.name || tag?.slug).filter(Boolean).join(', ')}
+                          </div>
+                        )}
+                      </td>
+                      <td>{p.brand ? p.brand : <span className="text-muted small">—</span>}</td>
                       <td>{p.category}</td>
                       <td>{p.price}</td>
                       <td>{p.stock ?? '-'}</td>
@@ -285,11 +374,38 @@ export default function AdminProducts() {
                   <input id="product-name" required name="name" value={form.name} onChange={handleChange} className="form-control" placeholder="Name" />
                 </div>
                 <div>
+                  <label htmlFor="product-brand" className="form-label">Brand</label>
+                  <input id="product-brand" name="brand" value={form.brand} onChange={handleChange} className="form-control" placeholder="Brand (optional)" />
+                </div>
+                <div>
                   <label htmlFor="product-category" className="form-label">Category</label>
                   <select id="product-category" name="categoryId" value={form.categoryId} onChange={handleChange} className="form-select">
                     <option value="">No Category</option>
-                    {categories.map(c => <option key={c.id} value={c.id}>{c.name}</option>)}
+                    {categories.map(c => <option key={c.id} value={c.id}>{c.label ?? c.fullName ?? c.name}</option>)}
                   </select>
+                </div>
+                <div>
+                  <label htmlFor="product-tags" className="form-label d-flex justify-content-between align-items-center">
+                    <span>Tags</span>
+                    <Link to="/admin/product-tags" className="small">Manage tags</Link>
+                  </label>
+                  <Select
+                    inputId="product-tags"
+                    classNamePrefix="tag-select"
+                    isMulti
+                    isClearable
+                    menuPortalTarget={selectMenuPortalTarget}
+                    options={tagOptionsMemo}
+                    value={selectedTagOptions}
+                    onChange={(selected) => {
+                      const values = Array.isArray(selected) ? selected.map(option => option.value) : [];
+                      setForm(f => ({ ...f, tagSlugs: values }));
+                    }}
+                    placeholder={tags.length === 0 ? 'Create tags to start tagging products' : 'Search and select tags…'}
+                    noOptionsMessage={({ inputValue }) => inputValue ? 'No matching tag. Try a different keyword.' : 'Start typing to search tags.'}
+                    isDisabled={tags.length === 0}
+                  />
+                  <div className="form-text small">Type to search, press Enter to add, and use backspace to remove a tag.</div>
                 </div>
                 <div className="row g-2">
                   <div className="col-12 col-sm-6">
@@ -309,6 +425,44 @@ export default function AdminProducts() {
                   <label htmlFor="product-stock" className="form-label">Stock</label>
                   <input id="product-stock" type="number" min="0" name="stock" value={form.stock} onChange={handleChange} className="form-control" placeholder="0" />
                 </div>
+                {!editingId && (
+                  <div className="mt-3 border rounded p-2">
+                    <div className="d-flex justify-content-between align-items-center mb-2">
+                      <strong className="small mb-0">Images</strong>
+                      <span className="badge text-bg-secondary">{pendingImages.length}/5</span>
+                    </div>
+                    <input
+                      type="file"
+                      accept="image/*"
+                      multiple
+                      className="form-control form-control-sm mb-2"
+                      onChange={(event) => {
+                        handlePendingFiles(event.target.files);
+                        event.target.value = '';
+                      }}
+                    />
+                    {pendingPreviews.length > 0 ? (
+                      <div className="d-flex flex-wrap gap-2">
+                        {pendingPreviews.map((url, idx) => (
+                          <div key={url} className="position-relative" style={{ width: 72, height: 72 }}>
+                            <img src={url} alt={`pending-${idx}`} style={{ objectFit: 'cover', width: '100%', height: '100%', borderRadius: 4, border: '1px solid #ccc' }} />
+                            <button
+                              type="button"
+                              className="btn btn-sm btn-danger position-absolute top-0 end-0 translate-middle p-0"
+                              style={{ width: 20, height: 20, fontSize: 10, lineHeight: '10px' }}
+                              aria-label="Remove image"
+                              onClick={() => removePendingImage(idx)}
+                            >
+                              &times;
+                            </button>
+                          </div>
+                        ))}
+                      </div>
+                    ) : (
+                      <p className="text-muted small mb-0">Select up to five images to upload immediately after the product is created.</p>
+                    )}
+                  </div>
+                )}
                 {editingId && (
                   <div className="mt-3 border rounded p-2">
                     <div className="d-flex justify-content-between align-items-center mb-2">

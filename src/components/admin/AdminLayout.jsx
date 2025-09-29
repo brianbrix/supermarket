@@ -11,9 +11,11 @@ export default function AdminLayout() {
         </button>
         <nav className="nav flex-column small gap-1">
           <AdminNavLink to="/admin/dashboard" icon="bi-speedometer2" label="Dashboard" collapsed={collapsed} />
+          <AdminNavLink to="/admin/homepage" icon="bi-columns-gap" label="Homepage" collapsed={collapsed} />
           <AdminNavLink to="/admin/products" icon="bi-box-seam" label="Products" collapsed={collapsed} />
           <AdminNavLink to="/admin/coupons" icon="bi-ticket-perforated" label="Coupons" collapsed={collapsed} />
           <AdminNavLink to="/admin/categories" icon="bi-tags" label="Categories" collapsed={collapsed} />
+          <AdminNavLink to="/admin/product-tags" icon="bi-bookmark-star" label="Product Tags" collapsed={collapsed} />
           <AdminNavLink to="/admin/orders" icon="bi-receipt-cutoff" label="Orders" collapsed={collapsed} />
           <AdminNavLink to="/admin/deliveries" icon="bi-truck" label="Deliveries" collapsed={collapsed} />
           <AdminNavLink to="/admin/delivery-shops" icon="bi-geo-alt" label="Delivery Shops" collapsed={collapsed} />

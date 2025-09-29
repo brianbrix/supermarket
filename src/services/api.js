@@ -34,11 +34,50 @@ const BASE_URL = configuredBase || runtimeDefaultBase;
 // Derive origin by stripping a trailing /api (with optional slash) if present
 const API_ORIGIN = BASE_URL.replace(/\/$/, '').replace(/\/api$/, '');
 
+const NBSP = '\u00A0';
+
+const slugify = (value) => {
+  if (value == null) return '';
+  return String(value)
+    .toLowerCase()
+    .trim()
+    .replace(/[^a-z0-9]+/g, '-')
+    .replace(/^-+|-+$/g, '');
+};
+
 function toAbsoluteAssetUrl(path) {
   if (!path) return '';
   if (/^https?:\/\//i.test(path)) return path; // already absolute
   if (path.startsWith('/')) return API_ORIGIN + path; // backend-root relative (e.g. /images/..)
   return API_ORIGIN + '/' + path; // fallback – relative without leading slash
+}
+
+function flattenCategoryTree(nodes, stack = []) {
+  const list = [];
+  nodes?.forEach(node => {
+    const breadcrumb = [...stack, node.name];
+    const resolvedSlug = slugify(node.slug ?? (typeof node.path === 'string' ? node.path.split('/').pop() : node.name));
+    const resolvedPath = node.path ?? breadcrumb.map((part, idx) => {
+        const slug = slugify(part);
+        return slug || `category-${idx}`;
+      }).join('/');
+    list.push({
+      id: node.id,
+      name: node.name,
+      fullName: node.fullName ?? breadcrumb.join(' > '),
+      depth: node.depth ?? stack.length,
+      parentId: node.parentId ?? null,
+      slug: resolvedSlug,
+      path: resolvedPath,
+  label: `${NBSP.repeat(stack.length * 2)}${stack.length ? '↳ ' : ''}${node.name}`,
+      breadcrumb,
+      raw: node
+    });
+    if (node.children && node.children.length) {
+      list.push(...flattenCategoryTree(node.children, [...stack, node.name]));
+    }
+  });
+  return list;
 }
 
 let authTokenGetter = () => null;
@@ -71,6 +110,16 @@ async function request(path, options = {}) {
 }
 
 export const api = {
+  homepage: {
+    get: (slug) => {
+      const unwrap = (res) => (res && typeof res === 'object' && 'data' in res ? res.data : res);
+      if (!slug) {
+        return request('/homepage').then(unwrap);
+      }
+      const normalized = String(slug).trim();
+      return request(`/homepage/${encodeURIComponent(normalized)}`).then(unwrap);
+    }
+  },
   settings: {
     get: () => request('/settings')
   },
@@ -128,13 +177,40 @@ export const api = {
       const qs = params.toString();
       return request(`/products/${id}/related${qs ? `?${qs}` : ''}`);
     },
-    search: ({ q, categoryId, minPrice, maxPrice, inStock, page=0, size=10 } = {}) => {
+    search: ({ q, brand, brands, categoryId, minPrice, maxPrice, inStock, scope, promoTag, tag, tags, trendingDays, ids, page = 0, size = 10 } = {}) => {
       const params = new URLSearchParams();
       if (q) params.set('q', q);
+      if (scope) params.set('scope', scope);
+      const tagCandidates = [];
+      if (Array.isArray(tags)) {
+        tags.filter(Boolean).forEach(value => tagCandidates.push(value));
+      }
+      if (tag) tagCandidates.push(tag);
+      if (promoTag) tagCandidates.push(promoTag);
+      const appendedTagSlugs = new Set();
+      tagCandidates
+        .map(value => (value == null ? '' : String(value).trim()))
+        .filter(value => value.length > 0)
+        .forEach(value => {
+          if (appendedTagSlugs.has(value)) return;
+          appendedTagSlugs.add(value);
+          params.append('tags[]', value);
+        });
+      if (promoTag) params.set('promoTag', promoTag);
+      if (brand) params.set('brand', brand);
+      if (Array.isArray(brands)) {
+        brands.filter(Boolean).forEach(b => params.append('brands[]', b));
+      }
       if (categoryId) params.set('categoryId', categoryId);
       if (minPrice != null) params.set('minPrice', minPrice);
       if (maxPrice != null) params.set('maxPrice', maxPrice);
       if (inStock != null) params.set('inStock', inStock);
+      if (trendingDays != null) params.set('trendingDays', trendingDays);
+      if (Array.isArray(ids)) {
+        ids.filter(id => id !== null && id !== undefined && id !== '').forEach(id => {
+          params.append('ids[]', id);
+        });
+      }
       params.set('page', page);
       params.set('size', size);
       const qs = params.toString();
@@ -150,10 +226,24 @@ export const api = {
       [...files].forEach(f => fd.append('files', f));
       return request(`/products/${id}/images`, { method: 'POST', body: fd });
     },
-    deleteImage: (productId, imageId) => request(`/products/${productId}/images/${imageId}`, { method: 'DELETE' })
+    deleteImage: (productId, imageId) => request(`/products/${productId}/images/${imageId}`, { method: 'DELETE' }),
+    ratings: {
+      list: (productId, { page = 0, size = 10 } = {}) => {
+        const params = new URLSearchParams();
+        params.set('page', page);
+        params.set('size', Math.max(1, Math.min(50, size)));
+        return request(`/products/${productId}/ratings?${params.toString()}`);
+      },
+      summary: (productId) => request(`/products/${productId}/ratings/summary`),
+      create: (productId, payload) => request(`/products/${productId}/ratings`, {
+        method: 'POST',
+        body: JSON.stringify(payload)
+      })
+    }
   },
   categories: {
-    list: () => request('/categories')
+    list: () => request('/categories').then(tree => flattenCategoryTree(tree)),
+    tree: () => request('/categories')
   },
   orders: {
     create: (payload) => request('/orders', { method: 'POST', body: JSON.stringify(payload) }),
@@ -264,8 +354,9 @@ export const api = {
       list: (page=0,size=10, filters={}) => {
         const params = new URLSearchParams();
         params.set('page', page); params.set('size', size);
-        const { q, categoryId, minPrice, maxPrice, inStock, sort='name', direction='asc' } = filters;
+        const { q, brand, categoryId, minPrice, maxPrice, inStock, sort='name', direction='asc' } = filters;
         if (q) params.set('q', q);
+        if (brand) params.set('brand', brand);
         if (categoryId) params.set('categoryId', categoryId);
         if (minPrice != null) params.set('minPrice', minPrice);
         if (maxPrice != null) params.set('maxPrice', maxPrice);
@@ -365,6 +456,20 @@ export const api = {
       list: () => request('/admin/system-settings'),
       save: (settings) => request('/admin/system-settings', { method: 'POST', body: JSON.stringify({ settings }) })
     },
+    productTags: {
+      list: ({ page = 0, size = 20, q, sort = 'name', direction = 'asc' } = {}) => {
+        const params = new URLSearchParams();
+        params.set('page', page);
+        params.set('size', size);
+        if (q) params.set('q', q);
+        if (sort) params.set('sort', sort);
+        if (direction) params.set('direction', direction);
+        return request(`/admin/product-tags?${params.toString()}`);
+      },
+      create: (payload) => request('/admin/product-tags', { method: 'POST', body: JSON.stringify(payload) }),
+      update: (id, payload) => request(`/admin/product-tags/${id}`, { method: 'PUT', body: JSON.stringify(payload) }),
+      delete: (id) => request(`/admin/product-tags/${id}`, { method: 'DELETE' })
+    },
     categories: {
       paged: (page=0,size=10) => request(`/admin/categories?page=${page}&size=${size}`),
       // Flexible signature:
@@ -394,6 +499,24 @@ export const api = {
       create: (payload) => request('/admin/categories', { method: 'POST', body: JSON.stringify(payload) }),
       update: (id, payload) => request(`/admin/categories/${id}`, { method: 'PUT', body: JSON.stringify(payload) }),
       delete: (id) => request(`/admin/categories/${id}`, { method: 'DELETE' })
+    },
+    homepageLayouts: {
+      list: ({ page = 0, size = 20, q, slug, status, active } = {}) => {
+        const params = new URLSearchParams();
+        params.set('page', page);
+        params.set('size', size);
+        if (q) params.set('q', q);
+        if (slug) params.set('slug', slug);
+        if (status) params.set('status', status);
+        if (active != null) params.set('active', active ? 'true' : 'false');
+        const qs = params.toString();
+        return request(`/admin/homepage/layouts${qs ? `?${qs}` : ''}`);
+      },
+      create: (payload) => request('/admin/homepage/layouts', { method: 'POST', body: JSON.stringify(payload) }),
+      get: (id) => request(`/admin/homepage/layouts/${id}`),
+      update: (id, payload) => request(`/admin/homepage/layouts/${id}`, { method: 'PUT', body: JSON.stringify(payload) }),
+      publish: (id) => request(`/admin/homepage/layouts/${id}/publish`, { method: 'POST' }),
+      remove: (id) => request(`/admin/homepage/layouts/${id}`, { method: 'DELETE' })
     }
   }
 };
@@ -411,7 +534,9 @@ export function mapProductResponse(raw) {
     imageObjects: [],
     description: '',
     stock: undefined,
-    categoryId: undefined
+    categoryId: undefined,
+    tags: [],
+    tagSlugs: []
   };
   // Prefer structured images (with id/url/position), fallback to legacy list of URLs.
   let imageMeta = Array.isArray(p.images) ? p.images : [];
@@ -422,9 +547,28 @@ export function mapProductResponse(raw) {
   // Sort by position just in case
   imageMeta = [...imageMeta].sort((a,b)=>(a.position??0)-(b.position??0));
   const images = imageMeta.map(im => toAbsoluteAssetUrl(im.url));
+  const ratingAverage = Number.isFinite(Number(p.ratingAverage ?? p.rating?.average))
+    ? Number(p.ratingAverage ?? p.rating?.average)
+    : 0;
+  const ratingCount = Number.isFinite(Number(p.ratingCount ?? p.rating?.count))
+    ? Number(p.ratingCount ?? p.rating?.count)
+    : 0;
+  const ratingLastSubmittedAt = p.ratingLastSubmittedAt ?? p.rating?.lastSubmittedAt ?? null;
+  const tags = Array.isArray(p.tags)
+    ? p.tags.map(tag => ({
+        id: tag.id ?? null,
+        name: tag.name ?? '',
+        slug: tag.slug ?? '',
+        description: tag.description ?? ''
+      }))
+    : [];
+  const tagSlugs = Array.isArray(p.tagSlugs)
+    ? p.tagSlugs.filter(Boolean).map(slug => String(slug))
+    : tags.map(tag => tag.slug).filter(Boolean);
   return {
     id: p.id,
     name: p.name,
+    brand: p.brand || '',
     price: Number(p.price),
     unit: p.unit || '',
     category: p.categoryName || 'Other',
@@ -433,7 +577,12 @@ export function mapProductResponse(raw) {
     imageObjects: imageMeta.map(im => ({ ...im, absoluteUrl: toAbsoluteAssetUrl(im.url) })), // expose metadata + absolute
     description: p.description || '',
     stock: p.stock != null ? p.stock : undefined,
-    categoryId: p.categoryId
+    categoryId: p.categoryId,
+    ratingAverage,
+    ratingCount,
+    ratingLastSubmittedAt,
+    tags,
+    tagSlugs
   };
 }
 

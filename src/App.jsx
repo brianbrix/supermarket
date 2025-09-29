@@ -9,6 +9,7 @@ const Checkout = lazy(() => import('./pages/Checkout.jsx'));
 const ProductDetail = lazy(() => import('./pages/ProductDetail.jsx'));
 const About = lazy(() => import('./pages/About.jsx'));
 const Orders = lazy(() => import('./pages/Orders.jsx'));
+const Products = lazy(() => import('./pages/Products.jsx'));
 const AdminLayout = lazy(() => import('./components/admin/AdminLayout.jsx'));
 const AdminProducts = lazy(() => import('./pages/admin/AdminProducts.jsx'));
 const AdminOrders = lazy(() => import('./pages/admin/AdminOrders.jsx'));
@@ -16,12 +17,14 @@ const AdminDashboard = lazy(() => import('./pages/admin/AdminDashboard.jsx'));
 const AdminPayments = lazy(() => import('./pages/admin/AdminPayments.jsx'));
 const AdminAnalytics = lazy(() => import('./pages/admin/AdminAnalytics.jsx'));
 const AdminCategories = lazy(() => import('./pages/admin/AdminCategories.jsx'));
+const AdminProductTags = lazy(() => import('./pages/admin/AdminProductTags.jsx'));
 const AdminUsers = lazy(() => import('./pages/admin/AdminUsers.jsx'));
 const AdminDeliveries = lazy(() => import('./pages/admin/AdminDeliveries.jsx'));
 const AdminDeliveryShops = lazy(() => import('./pages/admin/AdminDeliveryShops.jsx'));
 const AdminPaymentOptions = lazy(() => import('./pages/admin/AdminPaymentOptions.jsx'));
 const AdminCoupons = lazy(() => import('./pages/admin/AdminCoupons.jsx'));
 const AdminSystemSettings = lazy(() => import('./pages/admin/AdminSystemSettings.jsx'));
+const AdminHomepage = lazy(() => import('./pages/admin/AdminHomepage.jsx'));
 const AdminLogin = lazy(() => import('./pages/admin/AdminLogin.jsx'));
 const CustomerLogin = lazy(() => import('./pages/CustomerLogin.jsx'));
 const Register = lazy(() => import('./pages/Register.jsx'));
@@ -68,7 +71,7 @@ export default function App() {
                     <Suspense fallback={<RouteFallback />}>
                       <Routes>
                     <Route path="/" element={<Home />} />
-                    <Route path="/products" element={<Home />} />
+                    <Route path="/products" element={<Products />} />
                     <Route path="/cart" element={<Cart />} />
                     <Route path="/product/:id" element={<ProductDetail />} />
                     <Route path="/about" element={<About />} />
@@ -79,6 +82,7 @@ export default function App() {
                     <Route path="/register" element={<Register />} />
                     <Route path="/admin" element={<Protected><AdminLayout /></Protected>}>
                       <Route path="dashboard" element={<AdminDashboard />} />
+                      <Route path="homepage" element={<AdminHomepage />} />
                       <Route path="products" element={<AdminProducts />} />
                       <Route path="orders" element={<AdminOrders />} />
                       <Route path="deliveries" element={<AdminDeliveries />} />
@@ -87,6 +91,7 @@ export default function App() {
                       <Route path="payments" element={<AdminPayments />} />
                       <Route path="analytics" element={<AdminAnalytics />} />
                       <Route path="categories" element={<AdminCategories />} />
+                      <Route path="product-tags" element={<AdminProductTags />} />
                       <Route path="coupons" element={<AdminCoupons />} />
                       <Route path="payment-options" element={<AdminPaymentOptions />} />
                       <Route path="system-settings" element={<AdminSystemSettings />} />

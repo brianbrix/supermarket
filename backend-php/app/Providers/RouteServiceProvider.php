@@ -28,6 +28,18 @@ class RouteServiceProvider extends ServiceProvider
             return Limit::perMinute(60)->by($request->user()?->id ?: $request->ip());
         });
 
+        RateLimiter::for('product-ratings', function (Request $request) {
+            $identifier = $request->user()?->id
+                ? 'user:' . $request->user()->id
+                : 'ip:' . $request->ip();
+
+            return Limit::perMinutes(5, 3)->by($identifier)->response(function () {
+                return response()->json([
+                    'message' => __('Too many ratings submitted. Please try again later.'),
+                ], 429);
+            });
+        });
+
         $this->routes(function () {
             Route::middleware('api')
                 ->prefix('api')

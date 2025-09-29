@@ -1,285 +1,327 @@
-import { useMemo, useState, useEffect, useRef } from 'react';
+import { useEffect, useState } from 'react';
 import { api, mapProductResponse } from '../services/api.js';
 import { BRAND_NAME } from '../config/brand.js';
 import { useSettings } from '../context/SettingsContext.jsx';
-import ProductCard from '../components/ProductCard.jsx';
-import { useDebounce } from '../hooks/useDebounce.js';
-import PaginationBar from '../components/PaginationBar.jsx';
+import SectionRenderer, { clamp } from '../components/homepage/SectionRenderer.jsx';
+
+const DEFAULT_HOME_LAYOUT = () => ({
+  slug: 'home',
+  title: 'Default home experience',
+  status: 'published',
+  isActive: true,
+  layout: {
+    sections: [
+      {
+        id: 'hero-primary',
+        type: 'hero',
+        headline: 'Essentials delivered lightning fast',
+        subheading: 'Shop fresh groceries, household staples, and top brands with same-day delivery.',
+        backgroundImage: null,
+        primaryCta: {
+          label: 'Shop fresh picks',
+          href: '/products'
+        },
+        secondaryCta: {
+          label: 'Browse categories',
+          href: '/products'
+        }
+      },
+      {
+        id: 'featured-categories',
+        type: 'category-grid',
+        title: 'Shop by category',
+        subtitle: 'Jump into popular aisles shoppers love right now.',
+        columns: 4,
+        items: [
+          { label: 'Fresh Produce', icon: '🥑', href: '/products?category=produce' },
+          { label: 'Bakery & Breakfast', icon: '🥐', href: '/products?category=bakery' },
+          { label: 'Beverages', icon: '🧃', href: '/products?category=beverages' },
+          { label: 'Household Essentials', icon: '🧼', href: '/products?category=household' },
+          { label: 'Snacks & Treats', icon: '🍪', href: '/products?category=snacks' },
+          { label: 'Baby & Kids', icon: '🍼', href: '/products?category=baby' },
+          { label: 'Health & Beauty', icon: '💄', href: '/products?category=beauty' },
+          { label: 'Pet Supplies', icon: '🐾', href: '/products?category=pets' }
+        ]
+      },
+      {
+        id: 'daily-deals',
+        type: 'product-carousel',
+        title: 'Daily price drops',
+        dataSource: {
+          type: 'dynamic',
+          scope: 'promotions',
+          filters: {
+            tag: 'daily-deals',
+            limit: 8
+          }
+        },
+        display: {
+          showRating: true,
+          showAddToCart: true
+        }
+      },
+      {
+        id: 'banner-delivery',
+        type: 'image-banner',
+        title: 'Free delivery over KSh 2,500',
+        description: 'Schedule a delivery slot that works for you and we will handle the rest.',
+        theme: 'success',
+        media: {
+          imageUrl: null,
+          backgroundColor: '#e1f7e7'
+        },
+        cta: {
+          label: 'See delivery options',
+          href: '/delivery'
+        }
+      },
+      {
+        id: 'top-rated',
+        type: 'product-carousel',
+        title: 'Highly rated by shoppers',
+        dataSource: {
+          type: 'dynamic',
+          scope: 'top-rated',
+          filters: {
+            minRating: 4,
+            limit: 8
+          }
+        },
+        display: {
+          showRating: true,
+          showAddToCart: true
+        }
+      },
+      {
+        id: 'content-rich-text',
+        type: 'rich-text',
+        title: 'Why shoppers love Supermarket+',
+        body: [
+          { type: 'paragraph', content: 'We combine curated products, unbeatable freshness, and delightful delivery to keep your pantry stocked without the hassle.' },
+          { type: 'list', style: 'check', items: [
+            'Over 5,000 items with transparent pricing',
+            'Real-time order tracking and proactive support',
+            'Personalized recommendations powered by your favorites'
+          ] }
+        ]
+      }
+    ]
+  },
+  meta: {
+    theme: 'light'
+  }
+});
+
+const sectionKey = (section, index = 0) => (section?.id ? String(section.id) : `${section?.type || 'section'}-${index}`);
+
+const toSlug = (value) => {
+  if (value == null) return '';
+  return String(value)
+    .trim()
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, '-')
+    .replace(/^-+|-+$/g, '');
+};
+
+const collectFilterTags = (filters = {}) => {
+  const candidates = [];
+  if (Array.isArray(filters.tags)) {
+    filters.tags.filter(Boolean).forEach(tag => candidates.push(tag));
+  }
+  if (filters.tag) {
+    candidates.push(filters.tag);
+  }
+
+  const unique = new Set();
+  candidates
+    .map(toSlug)
+    .filter(Boolean)
+    .forEach(slug => unique.add(slug));
+
+  return Array.from(unique.values());
+};
+
+async function resolveProductsForSection(section) {
+  const filters = section?.dataSource?.filters ?? {};
+  const limit = clamp(Number(filters.limit ?? 8) || 8, 4, 20);
+  const tagSlugs = collectFilterTags(filters);
+
+  try {
+    let response;
+    if (section?.dataSource?.type === 'dynamic') {
+      const payload = { page: 0, size: limit };
+      if (section?.dataSource?.scope) {
+        payload.scope = section.dataSource.scope;
+      }
+      if (filters.categoryId) payload.categoryId = filters.categoryId;
+      if (filters.brand) payload.brand = filters.brand;
+      if (filters.q) payload.q = filters.q;
+      if (tagSlugs.length) {
+        payload.tags = tagSlugs;
+        if (!payload.promoTag) {
+          payload.promoTag = tagSlugs[0];
+        }
+      }
+      if (filters.minPrice != null) payload.minPrice = filters.minPrice;
+      if (filters.maxPrice != null) payload.maxPrice = filters.maxPrice;
+      if (filters.inStock != null) payload.inStock = filters.inStock;
+  if (filters.trendingDays != null) payload.trendingDays = Number(filters.trendingDays);
+      if (Array.isArray(filters.ids) && filters.ids.length > 0) {
+        payload.ids = filters.ids;
+      }
+      response = await api.products.search(payload);
+    } else {
+      response = await api.products.list(0, limit);
+    }
+
+    const raw = response?.content ?? response ?? [];
+    let items = raw.map(mapProductResponse);
+
+    if (filters.minRating != null) {
+      const minRating = Number(filters.minRating);
+      if (!Number.isNaN(minRating)) {
+        const ratedItems = items.filter(product => (product.ratingAverage ?? 0) >= minRating);
+        if (ratedItems.length > 0) {
+          items = ratedItems;
+        }
+      }
+    }
+
+    if (section?.dataSource?.scope === 'top-rated') {
+      items = [...items].sort((a, b) => (b.ratingAverage ?? 0) - (a.ratingAverage ?? 0));
+    }
+
+    if (section?.dataSource?.scope === 'promotions' && tagSlugs.length) {
+      items = items.filter(product => {
+        const productTagSlugs = Array.isArray(product.tagSlugs)
+          ? product.tagSlugs.map(toSlug)
+          : [];
+
+        if (productTagSlugs.length === 0 && Array.isArray(product.tags)) {
+          product.tags.forEach(tag => {
+            const slug = toSlug(tag?.slug ?? tag?.name ?? '');
+            if (slug) {
+              productTagSlugs.push(slug);
+            }
+          });
+        }
+
+        if (productTagSlugs.length === 0) return false;
+
+        return tagSlugs.some(slug => productTagSlugs.includes(slug));
+      });
+    }
+
+    return { items: items.slice(0, limit), error: null };
+  } catch (err) {
+    return { items: [], error: err?.message || 'Failed to load products' };
+  }
+}
 
 export default function Home() {
   const { settings } = useSettings();
   const storeName = settings?.storeName || BRAND_NAME;
-  const [query, setQuery] = useState('');
-  const [categoryId, setCategoryId] = useState('all');
-  const [categories, setCategories] = useState([]);
-  const [results, setResults] = useState([]);
-  const [pageMeta, setPageMeta] = useState({ page:0, size:100, totalElements:0, totalPages:0, first:true, last:true });
-  const [page, setPage] = useState(0);
-  const size = 20;
+  const [layout, setLayout] = useState(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(null);
-  const [inStockOnly, setInStockOnly] = useState(false);
-  const [priceRange, setPriceRange] = useState({ min: 0, max: 0 });
-  const [sliderBounds, setSliderBounds] = useState({ min: 0, max: 0 });
-  // Track when the initial baseline (categories + first page) has finished loading
-  const [baselineLoaded, setBaselineLoaded] = useState(false);
+  const [sectionProducts, setSectionProducts] = useState({});
 
-  // Initial load for categories, baseline products, and global price bounds from backend
   useEffect(() => {
-    let active = true;
-    Promise.all([api.categories.list(), api.products.list(page, size), api.products.priceRange()])
-      .then(([cats, pageResp, range]) => {
-        if (!active) return;
-        const catOptions = cats.map(c => ({ id: c.id, name: c.name }));
-        setCategories(catOptions);
-        const mapped = pageResp.content.map(mapProductResponse);
-        setResults(mapped);
-        setPageMeta(pageResp);
-        const min = Number(range?.min ?? 0);
-        const max = Number(range?.max ?? 0);
-  setSliderBounds({ min, max });
-  setPriceRange({ min, max });
-  const defaultNoPageKey = JSON.stringify({ q: '', cat: 'all', min, max, stock: 0 });
-  initialSearchSkippedRef.current = true;
-  lastFiltersNoPageRef.current = defaultNoPageKey;
-  lastSearchKeyRef.current = `${defaultNoPageKey}|page=0`;
-        setBaselineLoaded(true);
-        setLoading(false);
-      })
-      .catch(e => { if (!active) return; setError(e.message); setLoading(false); });
-    return () => { active = false; };
-  }, []);
-
-  // Debounced search params
-  const debouncedQuery = useDebounce(query, 500);
-  const debouncedRange = useDebounce(priceRange, 400);
-  const debouncedInStock = useDebounce(inStockOnly, 300);
-  const debouncedCategory = useDebounce(categoryId, 300);
-
-  // Update slider bounds when category changes using backend priceRange
-  useEffect(() => {
-    let active = true;
-    const catId = debouncedCategory !== 'all' ? debouncedCategory : undefined;
-    api.products.priceRange(catId)
-      .then(range => {
-        if (!active) return;
-        const min = Number(range?.min ?? 0);
-        const max = Number(range?.max ?? 0);
-        setSliderBounds({ min, max });
-        setPriceRange({ min, max });
-      })
-      .catch(() => {/* ignore bounds errors; keep previous bounds */});
-    return () => { active = false; };
-  }, [debouncedCategory]);
-
-  // Prevent double fetch + flicker: run search only after initial baseline load AND when filters actually change.
-  const initialSearchSkippedRef = useRef(false);
-  const lastSearchKeyRef = useRef('');
-  const lastFiltersNoPageRef = useRef('');
-  useEffect(() => {
-    if (!baselineLoaded) return; // don't run until baseline data present
-
-    // Treat a debounced range of 0/0 (while sliderBounds already known) as uninitialized; use slider bounds for identity key
-    const rangeUninitialized = debouncedRange.min === 0 && debouncedRange.max === 0 && (sliderBounds.min !== 0 || sliderBounds.max !== 0);
-    const effectiveMin = rangeUninitialized ? sliderBounds.min : debouncedRange.min;
-    const effectiveMax = rangeUninitialized ? sliderBounds.max : debouncedRange.max;
-
-    const filtersNoPageKey = JSON.stringify({
-      q: debouncedQuery || '',
-      cat: debouncedCategory,
-      min: effectiveMin,
-      max: effectiveMax,
-      stock: debouncedInStock ? 1 : 0
-    });
-
-    if (page !== 0 && filtersNoPageKey !== lastFiltersNoPageRef.current) {
-      setPage(0);
-      return;
-    }
-
-    const filtersKey = `${filtersNoPageKey}|page=${page}`;
-
-    if (filtersKey === lastSearchKeyRef.current) return; // no change
-
-    // If we haven't yet skipped initial search, verify initial empty state (defensive).
-    if (!initialSearchSkippedRef.current) {
-      const noFiltersApplied = !debouncedQuery && debouncedCategory === 'all' && !debouncedInStock && page === 0 &&
-        effectiveMin === sliderBounds.min && effectiveMax === sliderBounds.max;
-      if (noFiltersApplied) {
-        initialSearchSkippedRef.current = true;
-        lastFiltersNoPageRef.current = filtersNoPageKey;
-        lastSearchKeyRef.current = filtersKey;
-        return;
-      }
-    }
-
-    lastFiltersNoPageRef.current = filtersNoPageKey;
-    lastSearchKeyRef.current = filtersKey;
-    const requestKey = filtersKey;
     let cancelled = false;
     setLoading(true);
-    setError(null);
-    const payload = {
-      page,
-      size
-    };
-    if (debouncedQuery) payload.q = debouncedQuery;
-    if (debouncedCategory !== 'all') payload.categoryId = debouncedCategory;
-    // Only include range if user changed it (i.e., differs from slider bounds and not in uninitialized state)
-    if (!rangeUninitialized && (effectiveMin !== sliderBounds.min || effectiveMax !== sliderBounds.max)) {
-      payload.minPrice = effectiveMin;
-      payload.maxPrice = effectiveMax;
-    }
-    if (debouncedInStock) payload.inStock = true;
-
-    api.products.search(payload)
-      .then(pageResp => {
-        if (cancelled || lastSearchKeyRef.current !== requestKey) return;
-        const mapped = pageResp.content.map(mapProductResponse);
-        setResults(mapped);
-        setPageMeta(pageResp);
+    api.homepage.get()
+      .then(data => {
+        if (cancelled) return;
+        setLayout(data ?? DEFAULT_HOME_LAYOUT());
+        setError(null);
         setLoading(false);
       })
-      .catch(e => {
-        if (cancelled || lastSearchKeyRef.current !== requestKey) return;
-        setError(e.message);
+      .catch(err => {
+        if (cancelled) return;
+        setError(err?.message || 'We couldn\'t personalise the homepage right now. Showing a curated experience.');
+        setLayout(DEFAULT_HOME_LAYOUT());
         setLoading(false);
       });
     return () => { cancelled = true; };
-  }, [debouncedQuery, debouncedCategory, debouncedRange.min, debouncedRange.max, debouncedInStock, page, baselineLoaded, size, sliderBounds.min, sliderBounds.max]);
+  }, []);
 
-  // Reset to first page whenever filters fundamentally change (excluding page itself)
-  useEffect(() => { setPage(0); }, [debouncedQuery, debouncedCategory, debouncedRange.min, debouncedRange.max, debouncedInStock]);
+  useEffect(() => {
+    if (!layout?.layout?.sections) {
+      setSectionProducts({});
+      return;
+    }
 
-  function handlePriceChange(r) { setPriceRange(r); }
+    const productSections = layout.layout.sections
+      .map((section, index) => ({ section, index, key: sectionKey(section, index) }))
+      .filter(({ section }) => section.type === 'product-carousel');
 
-  function resetFilters() {
-    setQuery('');
-    setCategoryId('all');
-    setInStockOnly(false);
-    setPriceRange({ ...sliderBounds });
-  }
-  const activeFilterCount = (
-    (query ? 1 : 0) +
-    (categoryId !== 'all' ? 1 : 0) +
-    (inStockOnly ? 1 : 0) +
-    (priceRange.min !== sliderBounds.min ? 1 : 0) +
-    (priceRange.max !== sliderBounds.max ? 1 : 0)
-  );
-  const [showFilters, setShowFilters] = useState(true);
-  useEffect(()=> { if (window.innerWidth < 576) setShowFilters(false); }, []);
+    if (productSections.length === 0) {
+      setSectionProducts({});
+      return;
+    }
+
+    let cancelled = false;
+    setSectionProducts(prev => {
+      const next = { ...prev };
+      productSections.forEach(({ key }) => {
+        next[key] = { ...(next[key] ?? {}), loading: true, error: null };
+      });
+      return next;
+    });
+
+    Promise.all(productSections.map(async ({ section, key }) => {
+      const { items, error } = await resolveProductsForSection(section);
+      return { id: key, items, error };
+    })).then(results => {
+      if (cancelled) return;
+      setSectionProducts(prev => {
+        const next = { ...prev };
+        results.forEach(({ id, items, error }) => {
+          next[id] = { items, error, loading: false };
+        });
+        return next;
+      });
+    });
+
+    return () => { cancelled = true; };
+  }, [layout]);
+
+  const sections = layout?.layout?.sections?.map((section, index) => ({ section, index, key: sectionKey(section, index) })) ?? [];
+  const theme = layout?.meta?.theme === 'dark' ? 'dark' : 'light';
 
   return (
-    <section className="container-fluid py-3 px-3 px-sm-4">
-      <div className="d-flex flex-column flex-lg-row align-items-start align-items-lg-center gap-3 mb-3">
-        <div className="flex-grow-1">
-          <h1 className="h3 mb-1">Karibu {storeName} 👋</h1>
-          <p className="text-muted mb-2">Browse fresh produce, daily staples and more.</p>
-        </div>
-      </div>
-      <div className="mb-2 d-flex align-items-center gap-2 flex-wrap">
-        <h2 className="h6 m-0">Filter Products</h2>
-        <button type="button" className="btn btn-sm btn-outline-secondary d-flex align-items-center gap-1" onClick={()=>setShowFilters(s=>!s)} aria-expanded={showFilters} aria-controls="filtersPanel">
-          <i className={`bi ${showFilters ? 'bi-chevron-up' : 'bi-chevron-down'}`}></i>
-          <span className="d-sm-none">{showFilters ? 'Hide' : 'Show'}</span>
-          <span className="d-none d-sm-inline">{showFilters ? 'Hide Filters' : 'Show Filters'}</span>
-          {activeFilterCount > 0 && <span className="badge text-bg-success ms-1">{activeFilterCount}</span>}
-        </button>
-        <button type="button" className="btn btn-link p-0 small" onClick={resetFilters}>Reset</button>
-      </div>
-      {showFilters && (
-      <form id="filtersPanel" className="row g-3 mb-4" onSubmit={e=>e.preventDefault()} aria-label="Product filters">
-        <div className="col-12 col-md-6 col-lg-3">
-          <label className="form-label small text-muted" htmlFor="filterSearch">Search</label>
-          <input id="filterSearch" type="search" className="form-control" placeholder="e.g. unga" value={query} onChange={e=>setQuery(e.target.value)} />
-        </div>
-        <div className="col-6 col-md-3 col-lg-2">
-          <label className="form-label small text-muted" htmlFor="filterCategory">Category</label>
-          <select id="filterCategory" className="form-select" value={categoryId} onChange={e=>setCategoryId(e.target.value)}>
-            <option value="all">All</option>
-            {categories.map(c => <option key={c.id} value={c.id}>{c.name}</option>)}
-          </select>
-        </div>
-        <div className="col-12 col-md-6 col-lg-4">
-          <label className="form-label small text-muted d-block" htmlFor="priceMinInput">Price Range</label>
-          <div className="d-flex gap-2 align-items-start">
-            <div className="flex-grow-1">
-              <input
-                id="priceMinInput"
-                type="number"
-                className="form-control form-control-sm"
-                min={sliderBounds.min}
-                max={priceRange.max}
-                value={priceRange.min}
-                onChange={e=>handlePriceChange({ min: Number(e.target.value), max: priceRange.max })}
-                aria-label="Minimum price"
-                placeholder="Min"
-              />
-            </div>
-            <span className="small mt-1">–</span>
-            <div className="flex-grow-1">
-              <input
-                id="priceMaxInput"
-                type="number"
-                className="form-control form-control-sm"
-                min={priceRange.min}
-                max={sliderBounds.max}
-                value={priceRange.max}
-                onChange={e=>handlePriceChange({ min: priceRange.min, max: Number(e.target.value) })}
-                aria-label="Maximum price"
-                placeholder="Max"
-              />
-            </div>
+    <div className={`homepage-page ${theme === 'dark' ? 'bg-dark text-white' : 'bg-body'}`}>
+      <div className="container-fluid px-0">
+        {error && (
+          <div className="alert alert-warning mx-3 mx-sm-4 mt-3" role="alert">
+            {error}
           </div>
-    
-        </div>
-        <div className="col-6 col-md-3 col-lg-2">
-          <label className="form-label small text-muted d-block" htmlFor="inStockToggle">In stock only</label>
-          <div className="form-check m-0">
-            <input className="form-check-input" type="checkbox" id="inStockToggle" checked={inStockOnly} onChange={e=>setInStockOnly(e.target.checked)} />
+        )}
+
+        {loading && (
+          <div className="placeholder-section py-5 text-center">
+            <div className="placeholder-glow">
+              <span className="placeholder col-6" style={{ height: '2.5rem' }}></span>
+            </div>
+            <p className="text-muted mt-3">☻ Don't worry, once this opens up you'll have an experience like never before…🤤</p>
           </div>
-        </div>
-        <div className="col-6 col-md-3 col-lg-1 d-grid align-content-end">
-          <label className="form-label small text-muted visually-hidden" htmlFor="clearFiltersButton">Clear filters</label>
-          <button id="clearFiltersButton" type="button" onClick={resetFilters} className="btn btn-outline-secondary btn-sm">Clear</button>
-        </div>
-      </form>
-      )}
-  {error && <div className="alert alert-danger" role="alert">{error}</div>}
-  {loading ? (
-        <div className="row g-3">
-          {Array.from({length:8}).map((_,i)=>(
-            <div key={i} className="col-12 col-sm-6 col-lg-3">
-              <div className="card h-100 p-3">
-                <div className="placeholder-glow mb-2 text-center" style={{fontSize:'2.5rem'}}>
-                  <span className="placeholder col-6" style={{height:'2.5rem'}}></span>
-                </div>
-                <p className="placeholder-glow mb-2">
-                  <span className="placeholder col-8"></span>
-                </p>
-                <p className="placeholder-glow mb-2 small">
-                  <span className="placeholder col-10"></span>
-                  <span className="placeholder col-7"></span>
-                </p>
-                <div className="mt-auto placeholder-glow">
-                  <span className="placeholder col-5"></span>
-                </div>
-              </div>
-            </div>
-          ))}
-        </div>
-      ) : results.length === 0 ? (
-        <p className="text-muted">No products match your search.</p>
-      ) : (
-        <div className="row g-3">
-          {results.map(p => (
-            <div key={p.id} className="col-12 col-sm-6 col-lg-3">
-              <ProductCard product={p} />
-            </div>
-          ))}
-        </div>
-      )}
-      <PaginationBar {...pageMeta} onPageChange={setPage} />
-    </section>
+        )}
+
+        {!loading && (
+          <div className="vstack gap-4">
+            {sections.map(({ section, index, key }) => (
+              <SectionRenderer
+                key={key}
+                section={section}
+                storeName={storeName}
+                data={section.type === 'product-carousel' ? sectionProducts[key] : null}
+                theme={theme}
+              />
+            ))}
+          </div>
+        )}
+      </div>
+    </div>
   );
 }
+

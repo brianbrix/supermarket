@@ -11,6 +11,7 @@ class ProductResource extends JsonResource
         return [
             'id' => $this->id,
             'name' => $this->name,
+            'brand' => $this->brand,
             'description' => $this->description,
             'price' => (float)$this->price,
             'stock' => $this->stock,
@@ -21,6 +22,21 @@ class ProductResource extends JsonResource
             'images' => ProductImageResource::collection($this->whenLoaded('images')),
             'createdAt' => $this->created_at?->toIso8601String(),
             'updatedAt' => $this->updated_at?->toIso8601String(),
+            'ratingAverage' => $this->rating_avg ? round((float)$this->rating_avg, 2) : 0.0,
+            'ratingCount' => (int) ($this->rating_count ?? 0),
+            'ratingLastSubmittedAt' => $this->rating_last_submitted_at?->toIso8601String(),
+            'rating' => [
+                'average' => $this->rating_avg ? round((float)$this->rating_avg, 2) : 0.0,
+                'count' => (int) ($this->rating_count ?? 0),
+                'lastSubmittedAt' => $this->rating_last_submitted_at?->toIso8601String(),
+            ],
+            'tags' => $this->whenLoaded('tags', fn () => $this->tags->map(fn ($tag) => [
+                'id' => $tag->id,
+                'name' => $tag->name,
+                'slug' => $tag->slug,
+                'description' => $tag->description,
+            ])->all(), []),
+            'tagSlugs' => $this->whenLoaded('tags', fn () => $this->tags->pluck('slug')->all(), []),
         ];
     }
 }

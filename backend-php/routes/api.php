@@ -2,12 +2,14 @@
 
 use Illuminate\Support\Facades\Route;
 use App\Http\Controllers\API\ProductController;
+use App\Http\Controllers\API\ProductRatingController;
 use App\Http\Controllers\Admin\OrderAdminController;
 use App\Http\Controllers\Admin\PaymentAdminController;
 use App\Http\Controllers\API\CategoryController;
 use App\Http\Controllers\Admin\DashboardAdminController;
 use App\Http\Controllers\Admin\AnalyticsAdminController;
 use App\Http\Controllers\Admin\ProductAdminController;
+use App\Http\Controllers\Admin\ProductRatingController as AdminProductRatingController;
 use App\Http\Controllers\Admin\CategoryAdminController;
 use App\Http\Controllers\Admin\PaymentOptionAdminController;
 use App\Http\Controllers\Admin\SystemSettingController as AdminSystemSettingController;
@@ -25,14 +27,22 @@ use App\Http\Controllers\API\DeliveryController;
 use App\Http\Controllers\API\GeocodingController;
 use App\Http\Controllers\Admin\DeliveryShopAdminController;
 use App\Http\Controllers\Admin\DeliveryAdminController;
+use App\Http\Controllers\Admin\HomepageLayoutAdminController;
+use App\Http\Controllers\API\HomepageLayoutController;
+use App\Http\Controllers\Admin\ProductTagAdminController;
 
 Route::get('/products', [ProductController::class, 'index']);
 Route::get('/products/price-range', [ProductController::class, 'priceRange']);
 Route::get('/products/search', [ProductController::class, 'search']);
 Route::get('/products/{product}/related', [ProductController::class, 'related'])->whereNumber('product');
 Route::get('/products/{product}', [ProductController::class, 'show'])->whereNumber('product');
+Route::get('/products/{product}/ratings', [ProductRatingController::class, 'index'])->whereNumber('product');
+Route::get('/products/{product}/ratings/summary', [ProductRatingController::class, 'summary'])->whereNumber('product');
+Route::post('/products/{product}/ratings', [ProductRatingController::class, 'store'])->whereNumber('product')->middleware('throttle:product-ratings');
 Route::get('/products/category/{category}', [ProductController::class, 'byCategory']);
 Route::get('/categories', [CategoryController::class, 'index']);
+Route::get('/homepage', [HomepageLayoutController::class, 'show']);
+Route::get('/homepage/{slug}', [HomepageLayoutController::class, 'show']);
 // Orders (public/user scope – authenticated user association optional)
 Route::get('/orders', [OrderController::class, 'index']);
 Route::get('/orders/{order}', [OrderController::class, 'show']);
@@ -100,6 +110,9 @@ Route::middleware(['auth:sanctum','role:ADMIN'])->prefix('admin')->group(functio
     Route::post('/products', [ProductAdminController::class, 'store']);
     Route::put('/products/{product}', [ProductAdminController::class, 'update']);
     Route::delete('/products/{product}', [ProductAdminController::class, 'destroy']);
+    Route::get('/products/{product}/ratings', [AdminProductRatingController::class, 'index']);
+    Route::patch('/products/ratings/{rating}', [AdminProductRatingController::class, 'update'])->whereNumber('rating');
+    Route::delete('/products/ratings/{rating}', [AdminProductRatingController::class, 'destroy'])->whereNumber('rating');
     // Product images
     Route::get('/products/{product}/images', [\App\Http\Controllers\Admin\ProductImageController::class, 'index']);
     Route::post('/products/{product}/image', [\App\Http\Controllers\Admin\ProductImageController::class, 'store']);
@@ -129,6 +142,11 @@ Route::middleware(['auth:sanctum','role:ADMIN'])->prefix('admin')->group(functio
     Route::put('/categories/{category}', [CategoryController::class, 'update']);
     Route::delete('/categories/{category}', [CategoryController::class, 'destroy']);
 
+    Route::get('/product-tags', [ProductTagAdminController::class, 'index']);
+    Route::post('/product-tags', [ProductTagAdminController::class, 'store']);
+    Route::put('/product-tags/{productTag}', [ProductTagAdminController::class, 'update']);
+    Route::delete('/product-tags/{productTag}', [ProductTagAdminController::class, 'destroy']);
+
     Route::get('/delivery/shops', [DeliveryShopAdminController::class, 'index']);
     Route::post('/delivery/shops', [DeliveryShopAdminController::class, 'store']);
     Route::put('/delivery/shops/{deliveryShop}', [DeliveryShopAdminController::class, 'update']);
@@ -139,4 +157,11 @@ Route::middleware(['auth:sanctum','role:ADMIN'])->prefix('admin')->group(functio
     Route::get('/deliveries', [DeliveryAdminController::class, 'index']);
     Route::get('/deliveries/{delivery}', [DeliveryAdminController::class, 'show']);
     Route::put('/deliveries/{delivery}/status', [DeliveryAdminController::class, 'updateStatus']);
+
+    Route::get('/homepage/layouts', [HomepageLayoutAdminController::class, 'index']);
+    Route::post('/homepage/layouts', [HomepageLayoutAdminController::class, 'store']);
+    Route::get('/homepage/layouts/{layout}', [HomepageLayoutAdminController::class, 'show'])->whereNumber('layout');
+    Route::put('/homepage/layouts/{layout}', [HomepageLayoutAdminController::class, 'update'])->whereNumber('layout');
+    Route::post('/homepage/layouts/{layout}/publish', [HomepageLayoutAdminController::class, 'publish'])->whereNumber('layout');
+    Route::delete('/homepage/layouts/{layout}', [HomepageLayoutAdminController::class, 'destroy'])->whereNumber('layout');
 });

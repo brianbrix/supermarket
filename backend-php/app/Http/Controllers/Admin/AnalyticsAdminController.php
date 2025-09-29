@@ -5,6 +5,8 @@ namespace App\Http\Controllers\Admin;
 use App\Http\Controllers\Controller;
 use App\Models\Order;
 use App\Models\OrderItem;
+use App\Models\Product;
+use App\Models\ProductRating;
 use Carbon\Carbon;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\DB;
@@ -112,7 +114,7 @@ class AnalyticsAdminController extends Controller
             })
             ->groupBy('product_id')
             ->orderByDesc('quantity')
-            ->with('product:id,name')
+            ->with('product:id,name,rating_avg,rating_count')
             ->limit(5)
             ->get()
             ->map(function ($row) {
@@ -121,8 +123,12 @@ class AnalyticsAdminController extends Controller
                     'name' => optional($row->product)->name ?? 'Unnamed Product',
                     'quantity' => (int)$row->quantity,
                     'gross' => round((float)$row->gross, 2),
+                    'ratingAverage' => optional($row->product)->rating_avg ? round((float)$row->product->rating_avg, 2) : null,
+                    'ratingCount' => optional($row->product)->rating_count ?? 0,
                 ];
             });
+
+        $ratingSummary = $this->buildRatingSummary();
 
         return response()->json([
             'range' => [
@@ -143,6 +149,46 @@ class AnalyticsAdminController extends Controller
             'trend' => $trend,
             'statusBreakdown' => $statusBreakdown,
             'topProducts' => $topProducts,
+            'ratings' => $ratingSummary,
         ]);
+    }
+
+    private function buildRatingSummary(): array
+    {
+        $total = ProductRating::count();
+        $average = $total > 0 ? round((float) ProductRating::avg('rating'), 2) : 0.0;
+        $verified = $total > 0 ? ProductRating::where('is_verified', true)->count() : 0;
+
+        $bestProducts = Product::query()
+            ->where('rating_count', '>=', 5)
+            ->orderByDesc('rating_avg')
+            ->orderByDesc('rating_count')
+            ->limit(5)
+            ->get(['id', 'name', 'rating_avg', 'rating_count']);
+
+        $lowestProducts = Product::query()
+            ->where('rating_count', '>=', 5)
+            ->orderBy('rating_avg')
+            ->orderByDesc('rating_count')
+            ->limit(5)
+            ->get(['id', 'name', 'rating_avg', 'rating_count']);
+
+        return [
+            'average' => $average,
+            'count' => $total,
+            'verifiedShare' => $total > 0 ? round(($verified / $total) * 100, 2) : 0.0,
+            'best' => $bestProducts->map(fn (Product $product) => [
+                'id' => $product->id,
+                'name' => $product->name,
+                'ratingAverage' => round((float) $product->rating_avg, 2),
+                'ratingCount' => (int) $product->rating_count,
+            ])->values(),
+            'worst' => $lowestProducts->map(fn (Product $product) => [
+                'id' => $product->id,
+                'name' => $product->name,
+                'ratingAverage' => round((float) $product->rating_avg, 2),
+                'ratingCount' => (int) $product->rating_count,
+            ])->values(),
+        ];
     }
 }
