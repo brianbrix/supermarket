@@ -1,11 +1,13 @@
 import { useCart } from '../context/CartContext.jsx';
-import { formatKES } from '../utils/currency.js';
+import { useCurrencyFormatter } from '../context/SettingsContext.jsx';
 import { useNavigate, Link } from 'react-router-dom';
 import QuantityStepper from '../components/QuantityStepper.jsx';
 import CouponBox from '../components/CouponBox.jsx';
 
 export default function Cart() {
   const { items, updateQty, removeItem, clearCart, subtotal, discount, total } = useCart();
+  const formatCurrency = useCurrencyFormatter();
+  const formatAmount = formatCurrency;
   const navigate = useNavigate();
   if (!items.length) return (
     <section className="container py-4">
@@ -39,8 +41,8 @@ export default function Cart() {
                   <td>
                     <QuantityStepper size="sm" value={i.qty} onChange={q=>updateQty(i.id, q)} ariaLabel={`Quantity for ${i.name}`} />
                   </td>
-                  <td>{formatKES(i.price)}</td>
-                  <td>{formatKES(i.price * i.qty)}</td>
+                  <td>{formatAmount(i.price)}</td>
+                  <td>{formatAmount(i.price * i.qty)}</td>
                   <td className="text-end">
                     <button onClick={() => removeItem(i.id)} className="btn btn-outline-danger btn-sm" aria-label={`Remove ${i.name} from cart`}>
                       <i className="bi bi-trash"></i>
@@ -63,13 +65,13 @@ export default function Cart() {
               </button>
             </div>
             <div className="cart-item-card__meta">
-              <span>{formatKES(i.price)}{i.unit ? <span className="text-secondary">/{i.unit}</span> : null}</span>
+              <span>{formatAmount(i.price)}{i.unit ? <span className="text-secondary">/{i.unit}</span> : null}</span>
               <span>In cart: {i.qty}</span>
             </div>
             <div className="cart-item-card__footer">
               <QuantityStepper size="sm" value={i.qty} onChange={q=>updateQty(i.id, q)} ariaLabel={`Quantity for ${i.name}`} />
               <div className="d-flex justify-content-between align-items-center">
-                <span className="cart-item-card__price">{formatKES(i.price * i.qty)}</span>
+                <span className="cart-item-card__price">{formatAmount(i.price * i.qty)}</span>
                 <span className="text-muted small">Subtotal</span>
               </div>
             </div>
@@ -83,17 +85,17 @@ export default function Cart() {
           <div className="border rounded p-3 bg-body-secondary-subtle">
             <div className="d-flex justify-content-between small">
               <span>Subtotal</span>
-              <span>{formatKES(subtotal)}</span>
+              <span>{formatAmount(subtotal)}</span>
             </div>
             {discount > 0 && (
               <div className="d-flex justify-content-between text-success small fw-semibold mt-1">
                 <span>Coupon savings</span>
-                <span>-{formatKES(discount)}</span>
+                <span>-{formatAmount(discount)}</span>
               </div>
             )}
             <div className="d-flex justify-content-between fw-semibold mt-2">
               <span>Total</span>
-              <span>{formatKES(total)}</span>
+              <span>{formatAmount(total)}</span>
             </div>
             <p className="text-muted small mb-0 mt-1">Taxes included where applicable.</p>
           </div>

@@ -18,7 +18,8 @@ class OrderFactory extends Factory
             'total_gross' => 0,
             'total_net' => 0,
             'vat_amount' => 0,
-            'thumbnail_url' => $this->faker->imageUrl(300,200,'business', true)
+            'thumbnail_url' => $this->faker->imageUrl(300,200,'business', true),
+            'delivery_type' => 'PICKUP',
         ];
     }
 }

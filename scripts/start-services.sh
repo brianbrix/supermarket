@@ -23,6 +23,7 @@ COMPOSE_CMD=${COMPOSE_CMD:-"docker compose"}
 TRAEFIK_NETWORK=${TRAEFIK_NETWORK:-traefik_proxy}
 BUILD_IMAGES=1
 START_TRAEFIK=1
+BACKUP_DIR=${BACKUP_DIR:-/opt/db_backups/shop}
 
 info() { printf '\033[1;34m[info]\033[0m %s\n' "$*"; }
 warn() { printf '\033[1;33m[warn]\033[0m %s\n' "$*"; }
@@ -80,6 +81,16 @@ if ! docker network inspect "${TRAEFIK_NETWORK}" >/dev/null 2>&1; then
   warn "Traefik network '${TRAEFIK_NETWORK}' not found. Creating it now."
   docker network create "${TRAEFIK_NETWORK}" >/dev/null
   info "Created network '${TRAEFIK_NETWORK}'."
+fi
+
+if [[ ! -d "${BACKUP_DIR}" ]]; then
+  warn "Database backup directory '${BACKUP_DIR}' is missing. Attempting to create it."
+  if mkdir -p "${BACKUP_DIR}" 2>/dev/null; then
+    chmod 700 "${BACKUP_DIR}" 2>/dev/null || true
+    info "Created '${BACKUP_DIR}'. Adjust permissions if other services need access."
+  else
+    warn "Could not create '${BACKUP_DIR}'. Create it manually so Postgres can restore backups."
+  fi
 fi
 
 if [[ ${START_TRAEFIK} -eq 1 ]]; then

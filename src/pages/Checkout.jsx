@@ -1,6 +1,6 @@
-import { useEffect, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useForm } from 'react-hook-form';
-import { nameRules, phoneRules, addressRules } from '../utils/validation.js';
+import { nameRules, phoneRules, addressRules, optionalPhoneRules, optionalEmailRules } from '../utils/validation.js';
 import { Link, useNavigate } from 'react-router-dom';
 import { useCart } from '../context/CartContext.jsx';
 import { useToast } from '../context/ToastContext.jsx';
@@ -15,6 +15,9 @@ import { BRAND_COPY_FOOTER, BRAND_RECEIPT_TITLE } from '../config/brand.js';
 import { useAuth } from '../context/AuthContext.jsx';
 import { appendGuestOrder, ensureGuestSessionId } from '../utils/guestOrders.js';
 import CouponBox from '../components/CouponBox.jsx';
+import { useGeocodingSearch } from '../hooks/useGeocodingSearch.js';
+import { resolveGeoContext, resolveGeoCoordinates, resolveGeoLabel, resolvePlaceId } from '../utils/geocoding.js';
+import MapPickerModal from '../components/MapPickerModal.jsx';
 
 let pdfMakePromise;
 
@@ -40,6 +43,13 @@ function buildCartSignature(list) {
     .map(item => `${item.id}:${item.qty}`)
     .sort()
     .join('|');
+}
+
+function coerceNumber(value) {
+  if (value == null) return null;
+  if (typeof value === 'number' && Number.isFinite(value)) return value;
+  const parsed = Number(value);
+  return Number.isFinite(parsed) ? parsed : null;
 }
 
 function prorateTotals(grossBefore, discount, vatRate) {
@@ -73,7 +83,7 @@ export default function Checkout() {
   const { push } = useToast();
   const navigate = useNavigate();
   const formatCurrency = useCurrencyFormatter();
-  const formatKES = formatCurrency; // backward-compatible alias for existing helpers
+  const formatKES = formatCurrency;
 
   const persisted = (() => {
     let raw = {};
@@ -97,18 +107,23 @@ export default function Checkout() {
       selectedAddressId: raw?.selectedAddressId ?? null,
     };
   })();
+  const persistedDelivery = persisted.deliveryState ?? {};
   // react-hook-form integration for step 1 (customer details)
   const defaultValues = {
     name: persisted.form?.name || '',
     phone: persisted.form?.phone || '',
     delivery: persisted.form?.delivery || 'pickup',
-    address: persisted.form?.address || ''
+    address: persisted.form?.address || '',
+    deliveryContactPhone: persisted.form?.deliveryContactPhone || persistedDelivery.contactPhone || '',
+    deliveryContactEmail: persisted.form?.deliveryContactEmail || persistedDelivery.contactEmail || '',
+    deliveryInstructions: persisted.form?.deliveryInstructions || persistedDelivery.instructions || ''
   };
   const { register, handleSubmit, watch, trigger, setValue, formState: { errors, touchedFields } } = useForm({
     mode: 'onBlur',
     defaultValues
   });
   const form = watch();
+  const addressField = register('address', addressRules(form.delivery === 'delivery'));
   const [submitted, setSubmitted] = useState(persisted.submitted || false);
   const [orderSnapshot, setOrderSnapshot] = useState(() => persisted.orderSnapshot || null);
   const orderRef = useState(() => persisted.orderRef || generateOrderRef())[0];
@@ -122,53 +137,366 @@ export default function Checkout() {
   const mm = useMobileMoneyPayment();
   const [selectedAddressId, setSelectedAddressId] = useState(persisted.selectedAddressId || null);
   const savedAddresses = Array.isArray(preferences?.addresses) ? preferences.addresses : [];
-
   const [paymentOptions, setPaymentOptions] = useState([]);
-  const [modalOpen, setModalOpen] = useState(false);
-  const [selectedOption, setSelectedOption] = useState(null);
-  const [modalPhone, setModalPhone] = useState(form.phone || '');
-  const [modalAccountRef, setModalAccountRef] = useState('');
   const [optionsLoading, setOptionsLoading] = useState(false);
+  const [selectedOption, setSelectedOption] = useState(null);
+  const [modalOpen, setModalOpen] = useState(false);
+  const [modalPhone, setModalPhone] = useState(defaultValues.phone || '');
+  const [modalAccountRef, setModalAccountRef] = useState('');
+  const lastShopFetchRef = useRef(null);
+  const lastQuoteFetchRef = useRef({ signature: null, reason: null, timestamp: 0 });
 
-  const hasResumableOrder = Boolean(
-    submitted ||
-    step >= 2 ||
-    (orderSnapshot && Array.isArray(orderSnapshot.items) && orderSnapshot.items.length > 0) ||
-    (persisted && persisted.orderSnapshot && Array.isArray(persisted.orderSnapshot.items) && persisted.orderSnapshot.items.length > 0)
-  );
-  const shouldRedirectToCart = items.length === 0 && !hasResumableOrder;
+  const [deliveryState, setDeliveryState] = useState(() => ({
+    mode: persistedDelivery.mode ?? defaultValues.delivery ?? 'pickup',
+    locationLabel: persistedDelivery.locationLabel ?? defaultValues.address ?? '',
+    searchQuery: persistedDelivery.searchQuery ?? persistedDelivery.locationLabel ?? defaultValues.address ?? '',
+    lat: coerceNumber(persistedDelivery.lat),
+    lng: coerceNumber(persistedDelivery.lng),
+    placeId: persistedDelivery.placeId ?? null,
+    selectedResult: persistedDelivery.selectedResult ?? null,
+    shopId: persistedDelivery.shopId ?? persistedDelivery.shop?.id ?? null,
+    shop: persistedDelivery.shop ?? null,
+    quote: persistedDelivery.quote ?? null,
+    distanceKm: coerceNumber(persistedDelivery.distanceKm ?? persistedDelivery.quote?.distanceKm ?? persistedDelivery.quote?.distance_km),
+    estimatedMinutes: coerceNumber(persistedDelivery.estimatedMinutes ?? persistedDelivery.quote?.estimatedMinutes ?? persistedDelivery.quote?.etaMinutes ?? persistedDelivery.quote?.eta_minutes ?? persistedDelivery.quote?.durationMinutes),
+    availabilityReason: persistedDelivery.availabilityReason ?? null,
+    availabilityMessage: persistedDelivery.availabilityMessage ?? null,
+    context: persistedDelivery.context ?? '',
+    contactPhone: persistedDelivery.contactPhone ?? '',
+    contactEmail: persistedDelivery.contactEmail ?? '',
+    instructions: persistedDelivery.instructions ?? ''
+  }));
+  const updateDeliveryState = useCallback((patch = {}) => {
+    if (typeof patch === 'function') {
+      setDeliveryState(prev => ({ ...prev, ...(patch(prev) || {}) }));
+      return;
+    }
+    setDeliveryState(prev => ({ ...prev, ...(patch || {}) }));
+  }, []);
+  const [deliveryShops, setDeliveryShops] = useState(() => Array.isArray(persistedDelivery.shops) ? persistedDelivery.shops : []);
+  const [deliveryShopsLoading, setDeliveryShopsLoading] = useState(false);
+  const [deliveryShopsError, setDeliveryShopsError] = useState(null);
+  const [deliveryQuoteError, setDeliveryQuoteError] = useState(null);
+  const [deliveryQuoteLoading, setDeliveryQuoteLoading] = useState(false);
+  const [mapPickerOpen, setMapPickerOpen] = useState(false);
+
+  const {
+    query: locationQuery,
+    setQuery: setLocationQuery,
+    results: locationResults,
+    loading: locationLoading,
+    error: locationError
+  } = useGeocodingSearch(deliveryState.searchQuery ?? deliveryState.locationLabel ?? defaultValues.address ?? '', { debounceMs: 400, limit: 6 });
+  const selectedShopId = deliveryState.shop?.id ?? deliveryState.shopId ?? null;
+  const selectedDeliveryShop = useMemo(() => {
+    if (!selectedShopId) return deliveryState.shop ?? null;
+    const match = deliveryShops.find(shop => String(shop.id) === String(selectedShopId));
+    return match ?? deliveryState.shop ?? null;
+  }, [deliveryShops, deliveryState.shop, selectedShopId]);
+  const hasDeliveryCoordinates = Number.isFinite(coerceNumber(deliveryState.lat)) && Number.isFinite(coerceNumber(deliveryState.lng));
+  const mapInitialSelection = useMemo(() => {
+    const lat = coerceNumber(deliveryState.lat);
+    const lng = coerceNumber(deliveryState.lng);
+    return {
+      label: deliveryState.locationLabel || form.address || '',
+      context: deliveryState.context || '',
+      lat: Number.isFinite(lat) ? lat : null,
+      lng: Number.isFinite(lng) ? lng : null,
+      placeId: deliveryState.placeId ?? null
+    };
+  }, [deliveryState.context, deliveryState.lat, deliveryState.lng, deliveryState.locationLabel, deliveryState.placeId, form.address]);
+  const deliveryFee = useMemo(() => {
+    const toNumber = (value) => {
+      if (value == null) return null;
+      if (typeof value === 'object') {
+        if (value.amount != null) return toNumber(value.amount);
+        if (value.value != null) return toNumber(value.value);
+        if (value.total != null) return toNumber(value.total);
+        if (value.price != null) return toNumber(value.price);
+      }
+      const numeric = Number(value);
+      return Number.isFinite(numeric) ? numeric : null;
+    };
+
+    const candidates = [
+      deliveryState.quote?.fee,
+      deliveryState.quote?.amount,
+      deliveryState.quote?.price,
+      deliveryState.quote?.total,
+      deliveryState.quote?.value,
+      deliveryState.quote?.deliveryFee,
+      deliveryState.quote?.delivery_fee,
+      deliveryState.quote?.data?.fee,
+      deliveryState.quote?.data?.amount,
+      deliveryState.quote?.data?.price,
+      deliveryState.quote?.data?.total,
+      deliveryState.quote?.data?.value,
+      deliveryState.fee,
+      deliveryState.deliveryFee,
+      deliveryState.delivery_fee,
+      deliveryState.feeAmount,
+      deliveryState.fee_amount
+    ];
+
+    for (const candidate of candidates) {
+      const numeric = toNumber(candidate);
+      if (Number.isFinite(numeric)) {
+        return numeric;
+      }
+    }
+
+    return null;
+  }, [deliveryState]);
+  const snapshotDeliveryFee = useMemo(() => {
+    const feeCandidates = [
+      orderSnapshot?.delivery?.fee,
+      orderSnapshot?.delivery?.quote?.fee,
+      orderSnapshot?.delivery?.quote?.amount,
+      orderSnapshot?.delivery?.quote?.price,
+      orderSnapshot?.delivery?.quote?.total,
+      orderSnapshot?.delivery?.feeAmount,
+      orderSnapshot?.delivery?.fee_amount
+    ];
+    for (const candidate of feeCandidates) {
+      const numeric = coerceNumber(candidate?.amount ?? candidate?.value ?? candidate);
+      if (Number.isFinite(numeric)) return numeric;
+    }
+    return deliveryFee;
+  }, [deliveryFee, orderSnapshot?.delivery]);
+  const liveCartSummary = useMemo(() => {
+    const rawSubtotal = coerceNumber(subtotal);
+    const subtotalValue = Number.isFinite(rawSubtotal) ? rawSubtotal : 0;
+    const rawDiscount = coerceNumber(cartDiscount);
+    const discountValue = Number.isFinite(rawDiscount)
+      ? Math.min(Math.max(rawDiscount, 0), Math.max(subtotalValue, 0))
+      : 0;
+    const rawTotal = coerceNumber(total);
+    const totalValue = Number.isFinite(rawTotal) ? rawTotal : Math.max(subtotalValue - discountValue, 0);
+    const normalizedSubtotal = Math.round(subtotalValue * 100) / 100;
+    const normalizedDiscount = Math.round(discountValue * 100) / 100;
+    const normalizedTotal = Math.round(totalValue * 100) / 100;
+    const computed = prorateTotals(normalizedSubtotal, normalizedDiscount, VAT_RATE);
+    return {
+      grossBefore: normalizedSubtotal,
+      discount: normalizedDiscount,
+      total: normalizedTotal,
+      net: Math.round(computed.netAfter * 100) / 100,
+      vat: Math.round(computed.vatAfter * 100) / 100,
+      breakdown: computed
+    };
+  }, [VAT_RATE, cartDiscount, subtotal, total]);
+
+  const snapshotSummary = useMemo(() => {
+    if (!orderSnapshot) return null;
+    const snapshotTotal = coerceNumber(orderSnapshot.total);
+    const snapshotDiscount = coerceNumber(orderSnapshot.discount);
+    const snapshotGrossBefore = coerceNumber(orderSnapshot.totalBeforeDiscount);
+    const snapshotNet = coerceNumber(orderSnapshot.subtotal);
+    const snapshotVat = coerceNumber(orderSnapshot.vat);
+
+    const resolvedGrossBefore = Number.isFinite(snapshotGrossBefore)
+      ? Math.round(snapshotGrossBefore * 100) / 100
+      : (() => {
+          if (Number.isFinite(snapshotTotal) && Number.isFinite(snapshotDiscount)) {
+            return Math.round((snapshotTotal + snapshotDiscount) * 100) / 100;
+          }
+          return liveCartSummary.grossBefore;
+        })();
+
+    const resolvedTotal = Number.isFinite(snapshotTotal)
+      ? Math.round(snapshotTotal * 100) / 100
+      : Math.max(Math.round((resolvedGrossBefore - (Number.isFinite(snapshotDiscount) ? snapshotDiscount : liveCartSummary.discount)) * 100) / 100, 0);
+
+    const resolvedDiscount = Number.isFinite(snapshotDiscount)
+      ? Math.round(snapshotDiscount * 100) / 100
+      : Math.max(Math.round((resolvedGrossBefore - resolvedTotal) * 100) / 100, 0);
+
+    const computed = prorateTotals(resolvedGrossBefore, resolvedDiscount, VAT_RATE);
+    const resolvedNet = Number.isFinite(snapshotNet) ? Math.round(snapshotNet * 100) / 100 : Math.round(computed.netAfter * 100) / 100;
+    const resolvedVat = Number.isFinite(snapshotVat) ? Math.round(snapshotVat * 100) / 100 : Math.round(computed.vatAfter * 100) / 100;
+
+    return {
+      grossBefore: resolvedGrossBefore,
+      discount: resolvedDiscount,
+      total: resolvedTotal,
+      net: resolvedNet,
+      vat: resolvedVat,
+      breakdown: {
+        ...computed,
+        netAfter: resolvedNet,
+        vatAfter: resolvedVat
+      }
+    };
+  }, [VAT_RATE, liveCartSummary, orderSnapshot]);
+
+  const effectiveTotals = snapshotSummary ?? liveCartSummary;
+  const displaySubtotal = Number.isFinite(effectiveTotals.grossBefore) ? effectiveTotals.grossBefore : 0;
+  const displayDiscount = Number.isFinite(effectiveTotals.discount) ? effectiveTotals.discount : 0;
+  const displayTotal = Number.isFinite(effectiveTotals.total) ? effectiveTotals.total : Math.max(displaySubtotal - displayDiscount, 0);
+  const formattedSnapshotTotal = useMemo(() => {
+    const baseTotal = snapshotSummary ? snapshotSummary.total : liveCartSummary.total;
+    const deliveryPortion = Number.isFinite(snapshotDeliveryFee) ? snapshotDeliveryFee : 0;
+    const computed = (Number.isFinite(baseTotal) ? baseTotal : 0) + deliveryPortion;
+    return Math.round(Math.max(computed, 0) * 100) / 100;
+  }, [liveCartSummary, snapshotSummary, snapshotDeliveryFee]);
+  const breakdown = snapshotSummary ? snapshotSummary.breakdown : liveCartSummary.breakdown;
+  const liveCartTotal = liveCartSummary.total;
+  const liveCartNetTotal = liveCartSummary.net;
+  const liveCartVatTotal = liveCartSummary.vat;
+  const liveDiscount = liveCartSummary.discount;
+  const grossBeforeDiscount = liveCartSummary.grossBefore;
+  const totalWithDelivery = useMemo(() => {
+    const fee = Number.isFinite(snapshotDeliveryFee) ? snapshotDeliveryFee : 0;
+    return displayTotal + fee;
+  }, [displayTotal, snapshotDeliveryFee]);
+  const shouldShowDeliveryFee = useMemo(() => {
+    if (form.delivery === 'delivery') return true;
+    const deliveryMode = orderSnapshot?.delivery?.mode ?? orderSnapshot?.delivery?.type ?? null;
+    if (!deliveryMode) return false;
+    return String(deliveryMode).toUpperCase() === 'DELIVERY';
+  }, [form.delivery, orderSnapshot?.delivery]);
+  const resolvedDeliveryLocation = useMemo(() => {
+    const label = orderSnapshot?.delivery?.locationLabel
+      ?? orderSnapshot?.delivery?.address
+      ?? deliveryState.locationLabel
+      ?? form.address
+      ?? '';
+    const context = orderSnapshot?.delivery?.context
+      ?? deliveryState.context
+      ?? '';
+    if (!context) return label;
+    if (!label) return context;
+    return label.includes(context) ? label : `${label}, ${context}`;
+  }, [deliveryState.context, deliveryState.locationLabel, form.address, orderSnapshot?.delivery]);
+  const shouldRedirectToCart = !submitted && !orderSnapshot && items.length === 0;
 
   useEffect(() => {
-    if (shouldRedirectToCart) {
-      try { sessionStorage.removeItem('checkout'); } catch {}
-      setModalOpen(false);
+    if (form.delivery !== 'delivery') {
+      lastShopFetchRef.current = null;
+      if (deliveryShops.length) setDeliveryShops([]);
+      setDeliveryShopsLoading(false);
+      setDeliveryShopsError(null);
+      updateDeliveryState(prev => {
+        if (!prev.shop && !prev.shopId && prev.distanceKm == null && prev.quote == null && prev.fee == null && prev.estimatedMinutes == null) {
+          return prev;
+        }
+        return {
+          ...prev,
+          shop: null,
+          shopId: null,
+          distanceKm: null,
+          quote: null,
+          fee: null,
+          estimatedMinutes: null,
+          availabilityReason: null,
+          availabilityMessage: null
+        };
+      });
+      return;
     }
-  }, [shouldRedirectToCart]);
+    const lat = coerceNumber(deliveryState.lat);
+    const lng = coerceNumber(deliveryState.lng);
+    if (!Number.isFinite(lat) || !Number.isFinite(lng)) {
+      lastShopFetchRef.current = null;
+      if (deliveryShops.length) setDeliveryShops([]);
+      setDeliveryShopsLoading(false);
+      setDeliveryShopsError(null);
+      updateDeliveryState(prev => {
+        if (!prev.shop && !prev.shopId && prev.distanceKm == null && prev.quote == null && prev.fee == null && prev.estimatedMinutes == null) {
+          return prev;
+        }
+        return {
+          ...prev,
+          shop: null,
+          shopId: null,
+          distanceKm: null,
+          quote: null,
+          fee: null,
+          estimatedMinutes: null,
+          availabilityReason: null,
+          availabilityMessage: null
+        };
+      });
+      return;
+    }
+    const signature = `${lat.toFixed(5)}:${lng.toFixed(5)}`;
+    if (lastShopFetchRef.current === signature && deliveryShops.length > 0) {
+      return;
+    }
+    lastShopFetchRef.current = signature;
 
-  const effectivePaymentStatus = mm.payment?.status ?? orderSnapshot?.paymentStatus ?? null;
-  const modalPaymentState = (() => {
-    if (mm.status && mm.status !== 'idle') return mm.status;
-    if (!effectivePaymentStatus) return mm.status;
-    if (effectivePaymentStatus === 'SUCCESS') return 'succeeded';
-    if (effectivePaymentStatus === 'FAILED') return 'failed';
-    return 'pending';
-  })();
-  const grossBeforeDiscount = Number.isFinite(Number(subtotal)) ? Number(subtotal) : 0;
-  const liveDiscount = Number.isFinite(Number(cartDiscount)) ? Number(cartDiscount) : 0;
-  const breakdown = prorateTotals(grossBeforeDiscount, liveDiscount, VAT_RATE);
-  const liveCartTotal = breakdown.grossAfter;
-  const liveCartNetTotal = breakdown.netAfter;
-  const liveCartVatTotal = breakdown.vatAfter;
-  const snapshotTotal = Number.isFinite(Number(orderSnapshot?.total)) ? Number(orderSnapshot.total) : liveCartTotal;
-  const formattedSnapshotTotal = snapshotTotal.toFixed(2);
-  const snapshotDiscount = Number.isFinite(Number(orderSnapshot?.discount ?? orderSnapshot?.discountAmount))
-    ? Number(orderSnapshot?.discount ?? orderSnapshot?.discountAmount)
-    : null;
-  const displayDiscount = snapshotDiscount != null ? snapshotDiscount : liveDiscount;
-  const displaySubtotal = Number.isFinite(Number(orderSnapshot?.totalBeforeDiscount))
-    ? Number(orderSnapshot.totalBeforeDiscount)
-    : grossBeforeDiscount;
-  const displayTotal = snapshotTotal;
+    let cancelled = false;
+    setDeliveryShopsLoading(true);
+    setDeliveryShopsError(null);
+
+    (async () => {
+      try {
+        const response = await api.delivery.shops({ lat, lng });
+        if (cancelled) return;
+        const payload = Array.isArray(response?.content)
+          ? response.content
+          : Array.isArray(response?.data)
+            ? response.data
+            : Array.isArray(response)
+              ? response
+              : [];
+        const normalized = payload.map((shop) => {
+          const distance = coerceNumber(shop.distanceKm ?? shop.distance_km ?? shop.distance ?? shop.metrics?.distanceKm);
+          return Number.isFinite(distance) ? { ...shop, distanceKm: distance } : shop;
+        });
+        setDeliveryShops(normalized);
+        updateDeliveryState(prev => {
+          const prevSelectionId = prev.shopId ?? prev.shop?.id ?? null;
+          let nextShop = prevSelectionId ? normalized.find(shop => String(shop.id) === String(prevSelectionId)) : null;
+          if (!nextShop && normalized.length > 0) {
+            nextShop = normalized[0];
+          }
+          const nextDistance = coerceNumber(nextShop?.distanceKm ?? nextShop?.distance_km ?? nextShop?.metrics?.distanceKm);
+          return {
+            ...prev,
+            shop: nextShop ?? null,
+            shopId: nextShop?.id ?? null,
+            distanceKm: Number.isFinite(nextDistance) ? nextDistance : (prevSelectionId ? prev.distanceKm : null),
+            quote: null,
+            fee: null,
+            estimatedMinutes: null,
+            availabilityReason: null,
+            availabilityMessage: null
+          };
+        });
+      } catch (error) {
+        if (cancelled) return;
+        console.warn('Could not load delivery shops', error);
+        setDeliveryShopsError(error instanceof Error ? error : new Error('Unable to load delivery shops.'));
+        setDeliveryShops([]);
+        updateDeliveryState(prev => {
+          if (!prev.shop && !prev.shopId && prev.distanceKm == null && prev.quote == null && prev.fee == null && prev.estimatedMinutes == null) {
+            return prev;
+          }
+          return {
+            ...prev,
+            shop: null,
+            shopId: null,
+            distanceKm: null,
+            quote: null,
+            fee: null,
+            estimatedMinutes: null,
+            availabilityReason: null,
+            availabilityMessage: null
+          };
+        });
+      } finally {
+        if (!cancelled) setDeliveryShopsLoading(false);
+      }
+    })();
+
+    return () => {
+      cancelled = true;
+      if (lastQuoteFetchRef.current?.signature === signature && lastQuoteFetchRef.current?.reason === 'pending') {
+        lastQuoteFetchRef.current = { signature: null, reason: null, timestamp: 0 };
+      }
+    };
+  }, [form.delivery, deliveryState.lat, deliveryState.lng, deliveryShops.length, updateDeliveryState]);
 
   const PAYMENT_LABELS = {
     'mobile-money': 'Mobile Money',
@@ -240,6 +568,314 @@ export default function Checkout() {
     resolvedPaymentMethodCode
   );
 
+  const modalPaymentState = useMemo(() => {
+    const hookStatus = mm.status;
+    if (hookStatus === 'failed') {
+      return mm.payment?.failureReason === 'TIMEOUT_EXPIRED' ? 'timeout' : 'failed';
+    }
+    if (hookStatus && ['initiating', 'pending', 'reconciling', 'succeeded', 'error'].includes(hookStatus)) {
+      return hookStatus;
+    }
+    if (hookStatus === 'idle') {
+      const snapshotStatus = orderSnapshot?.paymentProgress?.status ?? orderSnapshot?.paymentStatus ?? null;
+      if (snapshotStatus) {
+        const normalized = snapshotStatus.toString().toUpperCase();
+        if (['INITIATED', 'PENDING', 'PROCESSING'].includes(normalized)) return 'pending';
+        if (normalized === 'SUCCESS') return 'succeeded';
+        if (normalized === 'FAILED') return 'failed';
+      }
+    }
+    return 'idle';
+  }, [mm.status, mm.payment?.failureReason, orderSnapshot?.paymentProgress?.status, orderSnapshot?.paymentStatus]);
+
+  const effectivePaymentStatus = useMemo(() => {
+    const statuses = [
+      orderSnapshot?.paymentProgress?.status,
+      orderSnapshot?.paymentStatus,
+      mm.payment?.status
+    ];
+    for (const status of statuses) {
+      if (!status) continue;
+      const normalized = status.toString().toUpperCase();
+      if (normalized) return normalized;
+    }
+    if (mm.status === 'succeeded') return 'SUCCESS';
+    if (mm.status === 'failed') return 'FAILED';
+    if (['initiating', 'pending', 'reconciling'].includes(mm.status)) return 'INITIATED';
+    return null;
+  }, [mm.status, mm.payment?.status, orderSnapshot?.paymentProgress?.status, orderSnapshot?.paymentStatus]);
+
+  useEffect(() => {
+    if (form.delivery !== 'delivery') {
+      lastQuoteFetchRef.current = { signature: null, reason: null, timestamp: 0 };
+      setDeliveryQuoteLoading(false);
+      setDeliveryQuoteError(null);
+      updateDeliveryState(prev => {
+        if (prev.quote == null && prev.fee == null) {
+          return prev;
+        }
+        return {
+          ...prev,
+          quote: null,
+          fee: null,
+          availabilityReason: null,
+          availabilityMessage: null
+        };
+      });
+      return;
+    }
+    const lat = coerceNumber(deliveryState.lat);
+    const lng = coerceNumber(deliveryState.lng);
+    const shopIdResolved = selectedDeliveryShop?.id
+      ?? selectedDeliveryShop?.shopId
+      ?? selectedDeliveryShop?.shop_id
+      ?? selectedShopId
+      ?? null;
+    if (!Number.isFinite(lat) || !Number.isFinite(lng) || !shopIdResolved) {
+      lastQuoteFetchRef.current = { signature: null, reason: null, timestamp: 0 };
+      setDeliveryQuoteLoading(false);
+      setDeliveryQuoteError(null);
+      updateDeliveryState(prev => {
+        if (prev.quote == null && prev.fee == null) {
+          return prev;
+        }
+        return {
+          ...prev,
+          quote: null,
+          fee: null,
+          availabilityReason: null,
+          availabilityMessage: null
+        };
+      });
+      return;
+    }
+    const cartTotal = Number.isFinite(liveCartTotal) ? Math.max(liveCartTotal, 0) : 0;
+    const signature = `${lat.toFixed(5)}:${lng.toFixed(5)}:${shopIdResolved}:${Math.round(cartTotal * 100)}`;
+    const lastQuoteMeta = lastQuoteFetchRef.current;
+    if (lastQuoteMeta?.signature === signature) {
+      if (lastQuoteMeta.reason === 'pending') {
+        return;
+      }
+      if (lastQuoteMeta.reason === 'success' && deliveryState.quote) {
+        return;
+      }
+      const elapsed = Date.now() - (lastQuoteMeta.timestamp ?? 0);
+      const cooldown = lastQuoteMeta.reason === 'unavailable'
+        ? 60_000
+        : (lastQuoteMeta.reason === 'error' ? 15_000 : 0);
+      if (cooldown > 0 && elapsed < cooldown) {
+        return;
+      }
+    }
+    lastQuoteFetchRef.current = { signature, reason: 'pending', timestamp: Date.now() };
+
+    let cancelled = false;
+    setDeliveryQuoteLoading(true);
+    setDeliveryQuoteError(null);
+
+    (async () => {
+      try {
+        const quoteResponse = await api.delivery.quote({ lat, lng, cartTotal, shopId: shopIdResolved });
+        if (cancelled) return;
+        const distanceVal = coerceNumber(
+          quoteResponse?.distanceKm
+            ?? quoteResponse?.shop?.distanceKm
+            ?? quoteResponse?.shop?.distance_km
+            ?? selectedDeliveryShop?.distanceKm
+            ?? selectedDeliveryShop?.distance_km
+        );
+        const etaVal = coerceNumber(
+          quoteResponse?.breakdown?.etaMinutes
+            ?? quoteResponse?.estimatedMinutes
+            ?? quoteResponse?.etaMinutes
+            ?? quoteResponse?.shop?.deliveryWindowMinutes
+            ?? quoteResponse?.shop?.etaMinutes
+        );
+        const feeVal = coerceNumber(quoteResponse?.cost ?? quoteResponse?.fee ?? quoteResponse?.price ?? quoteResponse?.amount);
+        const isAvailable = quoteResponse?.available !== false;
+        const unavailableMessage = (() => {
+          const rawMessage = typeof quoteResponse?.message === 'string' ? quoteResponse.message.trim() : '';
+          if (rawMessage) return rawMessage;
+          if (quoteResponse?.reason === 'outside_radius') return 'Delivery address is outside the service radius for the selected shop.';
+          if (quoteResponse?.reason === 'no_shop') return 'No delivery shop is available for your location yet.';
+          return 'Delivery is not available for the selected location.';
+        })();
+        if (!isAvailable) {
+          setDeliveryQuoteError(new Error(unavailableMessage));
+          updateDeliveryState(prev => ({
+            ...prev,
+            quote: quoteResponse,
+            distanceKm: Number.isFinite(distanceVal) ? distanceVal : prev.distanceKm,
+            estimatedMinutes: Number.isFinite(etaVal) ? etaVal : prev.estimatedMinutes,
+            fee: null,
+            availabilityReason: quoteResponse?.reason ?? 'unavailable',
+            availabilityMessage: unavailableMessage
+          }));
+          lastQuoteFetchRef.current = { signature, reason: 'unavailable', timestamp: Date.now() };
+          return;
+        }
+        setDeliveryQuoteError(null);
+        updateDeliveryState(prev => ({
+          ...prev,
+          quote: quoteResponse,
+          distanceKm: Number.isFinite(distanceVal) ? distanceVal : prev.distanceKm,
+          estimatedMinutes: Number.isFinite(etaVal) ? etaVal : prev.estimatedMinutes,
+          fee: Number.isFinite(feeVal) ? feeVal : prev.fee ?? feeVal ?? prev.fee,
+          availabilityReason: null,
+          availabilityMessage: null
+        }));
+        lastQuoteFetchRef.current = { signature, reason: 'success', timestamp: Date.now() };
+      } catch (error) {
+        if (cancelled) return;
+        console.warn('Could not calculate delivery quote', error);
+        const fallbackError = error instanceof Error ? error : new Error('Could not calculate delivery cost.');
+        setDeliveryQuoteError(fallbackError);
+        updateDeliveryState(prev => ({
+          ...prev,
+          quote: null,
+          fee: null,
+          availabilityReason: 'error',
+          availabilityMessage: fallbackError.message
+        }));
+        lastQuoteFetchRef.current = { signature, reason: 'error', timestamp: Date.now() };
+      } finally {
+        if (!cancelled) setDeliveryQuoteLoading(false);
+      }
+    })();
+
+    return () => {
+      cancelled = true;
+    };
+  }, [form.delivery, deliveryState.lat, deliveryState.lng, selectedShopId, selectedDeliveryShop, liveCartTotal, deliveryState.quote, updateDeliveryState]);
+
+  const handleLocationSelect = useCallback((result, overrides = {}) => {
+    if (!result && !overrides) return;
+    const effectiveLabel = typeof overrides.label === 'string' && overrides.label.trim().length > 0
+      ? overrides.label
+      : resolveGeoLabel(result);
+    const resolvedContext = (() => {
+      if (typeof overrides.context === 'string') return overrides.context;
+      if (Array.isArray(overrides.contextParts)) return overrides.contextParts.filter(Boolean).join(', ');
+      return resolveGeoContext(result);
+    })();
+    const combined = resolvedContext && effectiveLabel
+      ? `${effectiveLabel}${effectiveLabel.includes(resolvedContext) ? '' : `, ${resolvedContext}`}`
+      : effectiveLabel || resolvedContext;
+    const coordsOverride = overrides.coordinates || overrides.coords;
+    const coordinates = coordsOverride && Number.isFinite(coordsOverride.lat) && Number.isFinite(coordsOverride.lng)
+      ? { lat: coordsOverride.lat, lng: coordsOverride.lng }
+      : resolveGeoCoordinates(result);
+    const label = (combined || form.address || '').trim();
+    setLocationQuery(label);
+    setValue('address', label, { shouldDirty: true, shouldTouch: true });
+    trigger('address');
+    updateDeliveryState(prev => ({
+      locationLabel: label,
+      searchQuery: label,
+      lat: coordinates.lat,
+      lng: coordinates.lng,
+      placeId: overrides.placeId ?? resolvePlaceId(result) ?? prev.placeId ?? null,
+      context: resolvedContext || '',
+      selectedResult: overrides.raw ?? result,
+      shopId: null,
+      shop: null,
+      quote: null,
+      distanceKm: null,
+      estimatedMinutes: null,
+      fee: null,
+      availabilityReason: null,
+      availabilityMessage: null
+    }));
+    if (selectedAddressId) {
+      setSelectedAddressId(null);
+    }
+  }, [form.address, selectedAddressId, setLocationQuery, setSelectedAddressId, setValue, trigger, updateDeliveryState]);
+
+  const handleMapConfirm = useCallback((selection) => {
+    if (!selection) return;
+    const lat = coerceNumber(selection.lat ?? selection.latitude ?? selection?.coords?.lat);
+    const lng = coerceNumber(selection.lng ?? selection.longitude ?? selection?.coords?.lng);
+    const overrides = {
+      label: selection.label,
+      context: selection.context,
+      coordinates: { lat, lng },
+      placeId: selection.placeId ?? selection?.raw?.place_id ?? null,
+      raw: selection.raw ?? {
+        label: selection.label,
+        context: selection.context,
+        lat,
+        lng,
+        place_id: selection.placeId ?? null
+      }
+    };
+    const syntheticResult = {
+      label: selection.label,
+      lat,
+      lng,
+      latitude: lat,
+      longitude: lng,
+      place_id: overrides.placeId,
+      id: overrides.placeId,
+      context: selection.context,
+      position: { lat, lng }
+    };
+    handleLocationSelect(syntheticResult, overrides);
+  }, [handleLocationSelect]);
+
+  const buildDeliveryPayload = useCallback(() => {
+    if (form.delivery !== 'delivery') {
+      return {
+        mode: 'PICKUP',
+        type: 'PICKUP',
+        method: 'PICKUP'
+      };
+    }
+    const lat = coerceNumber(deliveryState.lat);
+    const lng = coerceNumber(deliveryState.lng);
+    const shopIdResolved = selectedDeliveryShop?.id ?? selectedShopId ?? null;
+    return {
+      mode: 'DELIVERY',
+      type: 'DELIVERY',
+      method: 'DELIVERY',
+      address: form.address || deliveryState.locationLabel || '',
+      locationLabel: deliveryState.locationLabel || form.address || '',
+      latitude: Number.isFinite(lat) ? lat : null,
+      longitude: Number.isFinite(lng) ? lng : null,
+      coordinates: Number.isFinite(lat) && Number.isFinite(lng) ? { lat, lng } : null,
+      context: deliveryState.context || '',
+      placeId: deliveryState.placeId ?? deliveryState.selectedResult?.id ?? null,
+      shopId: shopIdResolved,
+      shopName: selectedDeliveryShop?.name ?? selectedDeliveryShop?.label ?? null,
+      shop: selectedDeliveryShop ?? null,
+      quote: deliveryState.quote ?? null,
+      estimatedDistanceKm: deliveryState.distanceKm ?? null,
+      estimatedMinutes: deliveryState.estimatedMinutes ?? null,
+      fee: Number.isFinite(deliveryFee) ? deliveryFee : null,
+      contactPhone: (form.deliveryContactPhone || '').trim() || null,
+      contactEmail: (form.deliveryContactEmail || '').trim() || null,
+      instructions: (form.deliveryInstructions || '').trim() || null
+    };
+  }, [deliveryFee, deliveryState.context, deliveryState.distanceKm, deliveryState.estimatedMinutes, deliveryState.lat, deliveryState.lng, deliveryState.locationLabel, deliveryState.placeId, deliveryState.quote, deliveryState.selectedResult, form.address, form.delivery, form.deliveryContactEmail, form.deliveryContactPhone, form.deliveryInstructions, selectedDeliveryShop, selectedShopId]);
+
+  const handleShopSelect = useCallback((shop) => {
+    if (!shop) {
+      updateDeliveryState({ shopId: null, shop: null, quote: null, distanceKm: null, estimatedMinutes: null, fee: null, availabilityReason: null, availabilityMessage: null });
+      return;
+    }
+    const nextDistance = coerceNumber(shop.distanceKm ?? shop.distance_km ?? shop.distance ?? shop.metrics?.distanceKm);
+    const nextEta = coerceNumber(shop.estimatedMinutes ?? shop.etaMinutes ?? shop.eta_minutes ?? shop.deliveryWindowMinutes ?? shop.metrics?.etaMinutes);
+    updateDeliveryState({
+      shopId: shop.id ?? null,
+      shop,
+      quote: null,
+      distanceKm: Number.isFinite(nextDistance) ? nextDistance : null,
+      estimatedMinutes: Number.isFinite(nextEta) ? nextEta : null,
+      fee: null,
+      availabilityReason: null,
+      availabilityMessage: null
+    });
+  }, [updateDeliveryState]);
+
   const handlePayMethodChange = (value) => {
     setPayMethod(value);
     persist({ payMethod: value });
@@ -283,6 +919,16 @@ export default function Checkout() {
       ?? nextSnapshot?.orderNumber
       ?? nextSnapshot?.orderRef
       ?? orderRef;
+    const nextDeliveryState = partial?.deliveryState ?? deliveryState;
+    const { shops: _ignoredShops, ...deliveryForStorage } = nextDeliveryState ?? {};
+    const sanitizedDelivery = nextDeliveryState
+      ? {
+          ...deliveryForStorage,
+          shopId: deliveryForStorage?.shopId ?? deliveryForStorage?.shop?.id ?? null,
+          shop: selectedDeliveryShop ?? deliveryForStorage?.shop ?? null,
+          quote: deliveryForStorage?.quote ?? null
+        }
+      : null;
     const data = {
       form,
       step,
@@ -291,13 +937,14 @@ export default function Checkout() {
       orderRef: resolvedOrderRef,
       orderSnapshot: nextSnapshot,
       selectedAddressId,
+      deliveryState: sanitizedDelivery,
       ...partial
     };
     try { sessionStorage.setItem('checkout', JSON.stringify(data)); } catch {}
   }
 
   // persist whenever core state changes
-  useEffect(() => { persist({}); }, [form, step, submitted, payMethod, selectedAddressId]);
+  useEffect(() => { persist({}); }, [form, step, submitted, payMethod, selectedAddressId, deliveryState]);
 
   useEffect(() => {
     if (!selectedAddressId) return;
@@ -306,10 +953,38 @@ export default function Checkout() {
       setSelectedAddressId(null);
       return;
     }
-    if (form.delivery === 'delivery' && form.address !== match.details) {
-      setValue('address', match.details, { shouldDirty: false, shouldTouch: false });
+    if (form.delivery === 'delivery') {
+      if (form.address !== match.details) {
+        setValue('address', match.details, { shouldDirty: false, shouldTouch: false });
+      }
+      const latCandidate = coerceNumber(match.lat ?? match.latitude ?? match.coordinates?.lat ?? match.location?.lat);
+      const lngCandidate = coerceNumber(match.lng ?? match.longitude ?? match.coordinates?.lng ?? match.location?.lng);
+      setValue('deliveryContactPhone', match.contactPhone ?? '', { shouldDirty: false, shouldTouch: false });
+      setValue('deliveryContactEmail', match.contactEmail ?? '', { shouldDirty: false, shouldTouch: false });
+      setValue('deliveryInstructions', match.instructions ?? '', { shouldDirty: false, shouldTouch: false });
+      updateDeliveryState({
+        locationLabel: match.details || '',
+        searchQuery: match.details || '',
+        lat: latCandidate,
+        lng: lngCandidate,
+        placeId: match.placeId ?? match.id ?? null,
+        shopId: match.deliveryShopId ?? match.shopId ?? deliveryState.shopId ?? null,
+        quote: null,
+        distanceKm: null,
+        estimatedMinutes: null,
+        fee: null,
+        availabilityReason: null,
+        availabilityMessage: null,
+        context: match.context ?? '',
+        contactPhone: match.contactPhone ?? '',
+        contactEmail: match.contactEmail ?? '',
+        instructions: match.instructions ?? ''
+      });
+      if (match.details) {
+        setLocationQuery(match.details);
+      }
     }
-  }, [selectedAddressId, savedAddresses, form.delivery, form.address, setValue]);
+  }, [selectedAddressId, savedAddresses, form.delivery, form.address, setValue, updateDeliveryState, deliveryState.shopId, setLocationQuery]);
 
   useEffect(() => {
     if (!selectedAddressId) return;
@@ -324,6 +999,20 @@ export default function Checkout() {
 
   useEffect(() => {
     if (form.delivery !== 'delivery') return;
+    updateDeliveryState(prev => {
+      const nextPhone = form.deliveryContactPhone ?? '';
+      const nextEmail = form.deliveryContactEmail ?? '';
+      const nextInstructions = form.deliveryInstructions ?? '';
+      const patch = {};
+      if ((prev.contactPhone ?? '') !== nextPhone) patch.contactPhone = nextPhone;
+      if ((prev.contactEmail ?? '') !== nextEmail) patch.contactEmail = nextEmail;
+      if ((prev.instructions ?? '') !== nextInstructions) patch.instructions = nextInstructions;
+      return Object.keys(patch).length > 0 ? patch : {};
+    });
+  }, [form.delivery, form.deliveryContactEmail, form.deliveryContactPhone, form.deliveryInstructions, updateDeliveryState]);
+
+  useEffect(() => {
+    if (form.delivery !== 'delivery') return;
     if (selectedAddressId) return;
     const match = savedAddresses.find(address => (address.details || '').trim() === (form.address || '').trim());
     if (match) {
@@ -334,13 +1023,36 @@ export default function Checkout() {
   // address requirement depends on delivery method; trigger validation when delivery changes
   useEffect(() => {
     if (form.delivery !== 'delivery') {
-      setValue('address', '');
+      setValue('address', '', { shouldDirty: false, shouldTouch: false });
+      setValue('deliveryContactPhone', '', { shouldDirty: false, shouldTouch: false });
+      setValue('deliveryContactEmail', '', { shouldDirty: false, shouldTouch: false });
+      setValue('deliveryInstructions', '', { shouldDirty: false, shouldTouch: false });
       if (selectedAddressId) {
         setSelectedAddressId(null);
       }
+      updateDeliveryState({
+        locationLabel: '',
+        searchQuery: '',
+        lat: null,
+        lng: null,
+        placeId: null,
+        selectedResult: null,
+        shopId: null,
+        shop: null,
+        quote: null,
+        distanceKm: null,
+        estimatedMinutes: null,
+        fee: null,
+        availabilityReason: null,
+        availabilityMessage: null,
+        context: '',
+        contactPhone: '',
+        contactEmail: '',
+        instructions: ''
+      });
     }
     trigger('address');
-  }, [form.delivery, setValue, trigger, selectedAddressId]);
+  }, [form.delivery, setValue, trigger, selectedAddressId, updateDeliveryState]);
 
   // react-hook-form handles validation; trigger() used before advancing
 
@@ -351,7 +1063,27 @@ export default function Checkout() {
     if (h) h.focus();
   }, [step]);
 
+  useEffect(() => {
+    if (form.delivery === 'delivery') {
+      if (deliveryState.mode !== 'delivery') {
+        updateDeliveryState({ mode: 'delivery' });
+      }
+    } else if (deliveryState.mode !== 'pickup') {
+      updateDeliveryState({ mode: 'pickup' });
+    }
+  }, [form.delivery, deliveryState.mode, updateDeliveryState]);
+
   const onSubmitDetails = () => {
+    if (form.delivery === 'delivery') {
+      if (!hasDeliveryCoordinates) {
+        push('Please choose your delivery location from the suggestions so we can calculate delivery.', 'warning');
+        return;
+      }
+      if (!selectedShopId && !selectedDeliveryShop) {
+        push('Select the shop that should prepare your delivery.', 'warning');
+        return;
+      }
+    }
     setStep(2);
     push('Details accepted');
   };
@@ -404,12 +1136,39 @@ export default function Checkout() {
 
   async function ensureBackendOrder() {
     try {
-      const created = await api.orders.create({
+      const deliveryPayload = buildDeliveryPayload();
+      const payload = {
         customerName: form.name,
         customerPhone: form.phone,
         items: items.map(i => ({ productId: i.id, quantity: i.qty })),
-        couponCode: coupon?.code || undefined
-      });
+        couponCode: coupon?.code || undefined,
+        delivery: deliveryPayload
+      };
+      if (deliveryPayload?.mode === 'DELIVERY') {
+        const contactPhone = (form.deliveryContactPhone || '').trim();
+        const contactEmail = (form.deliveryContactEmail || '').trim();
+        const instructions = (form.deliveryInstructions || '').trim();
+        const lat = coerceNumber(deliveryPayload.latitude ?? deliveryPayload.coordinates?.lat);
+        const lng = coerceNumber(deliveryPayload.longitude ?? deliveryPayload.coordinates?.lng);
+        const contextString = (deliveryPayload.context || '').trim();
+        payload.deliveryType = 'DELIVERY';
+        payload.deliveryShopId = deliveryPayload.shopId ?? null;
+        payload.deliveryAddressLine1 = deliveryPayload.address || deliveryPayload.locationLabel || '';
+        if (contextString) {
+          payload.deliveryAddressLine2 = contextString;
+          const contextParts = contextString.split(',').map(part => part.trim()).filter(Boolean);
+          if (!payload.deliveryCity && contextParts[0]) payload.deliveryCity = contextParts[0];
+          if (!payload.deliveryRegion && contextParts[1]) payload.deliveryRegion = contextParts[1];
+        }
+        if (Number.isFinite(lat)) payload.deliveryLat = lat;
+        if (Number.isFinite(lng)) payload.deliveryLng = lng;
+        payload.deliveryContactPhone = contactPhone || undefined;
+        payload.deliveryContactEmail = contactEmail || undefined;
+        payload.deliveryNotes = instructions || undefined;
+      } else {
+        payload.deliveryType = 'PICKUP';
+      }
+      const created = await api.orders.create(payload);
       const backendOrderNumber = created?.orderNumber ?? created?.order_number ?? null;
       // Create a snapshot of the current cart for display and receipts before clearing
       const cartSig = buildCartSignature(items);
@@ -468,7 +1227,8 @@ export default function Checkout() {
         userId: snapshotUserId,
         paymentStatus: created?.latestPayment?.status ?? created?.paymentStatus ?? null,
         paymentMethod: created?.latestPayment?.method ?? created?.paymentMethod ?? null,
-        couponCode: created?.couponCode ?? created?.coupon_code ?? coupon?.code ?? null
+        couponCode: created?.couponCode ?? created?.coupon_code ?? coupon?.code ?? null,
+        delivery: created?.delivery ?? deliveryPayload ?? null
       };
       setOrderSnapshot(snapshot);
       persist({ orderSnapshot: snapshot });
@@ -561,9 +1321,9 @@ export default function Checkout() {
       // Clear any cart backup since the order/payment is complete
       try { clearCart(); } catch {}
       try { clearCartBackup(); } catch {}
-      push('Payment successful');
-      setModalOpen(false);
-      // store order history
+  push('Payment successful');
+  setModalOpen(false);
+  // store order history
       try {
         const itemsForStorage = (Array.isArray(snapshot.items) ? snapshot.items : items).map((i, idx) => {
           const qty = Number.isFinite(Number(i.qty)) ? Number(i.qty) : 0;
@@ -607,6 +1367,7 @@ export default function Checkout() {
               ? 'AIRTEL_STK_PUSH'
               : null);
         const snapshotOrderRef = snapshot.orderNumber ?? snapshot.orderRef ?? displayOrderRef;
+        const deliveryInfo = snapshot.delivery ?? buildDeliveryPayload();
         const guestOrder = {
           id: snapshot.backendOrderId ?? orderSnapshot?.backendOrderId ?? `guest-${orderRef}`,
           sessionId: guestSessionId,
@@ -635,13 +1396,14 @@ export default function Checkout() {
           snapshot,
           guestPaymentRef: paymentRef || null,
           guestPaymentMethod: payMethod,
+          delivery: deliveryInfo
         };
         appendGuestOrder(guestOrder, guestSessionId);
         try { localStorage.removeItem('orders'); } catch {}
       } catch {}
     }
-    if (mm.status === 'failed' || mm.status === 'timeout') {
-      const timedOut = mm.payment?.failureReason === 'TIMEOUT_EXPIRED' || mm.status === 'timeout';
+    if (mm.status === 'failed' || modalPaymentState === 'timeout') {
+      const timedOut = mm.payment?.failureReason === 'TIMEOUT_EXPIRED' || modalPaymentState === 'timeout';
       if (orderSnapshot?.backendOrderId) {
         (async () => {
           try {
@@ -670,7 +1432,7 @@ export default function Checkout() {
       persist({ orderSnapshot: null });
       setModalOpen(true);
     }
-  }, [mm.status]);
+  }, [mm.status, modalPaymentState]);
 
   function exportSummary() {
     const snap = orderSnapshot || { items, total };
@@ -679,11 +1441,18 @@ export default function Checkout() {
       `Name: ${form.name}`,
       `Phone: ${form.phone}`,
       `Delivery: ${form.delivery}`,
-      ...(form.delivery==='delivery' ? [`Address: ${form.address}`] : []),
+      ...(form.delivery === 'delivery'
+        ? [
+            `Address: ${resolvedDeliveryLocation}`,
+            `Contact phone: ${form.deliveryContactPhone || form.phone}`,
+            ...(form.deliveryContactEmail ? [`Contact email: ${form.deliveryContactEmail}`] : []),
+            ...(form.deliveryInstructions ? [`Instructions: ${form.deliveryInstructions}`] : [])
+          ]
+        : []),
       `Payment: ${paymentRef || 'N/A'}`,
       'Items:',
-      ...((Array.isArray(snap.items) ? snap.items : items).map(i => `  - ${i.name} x${i.qty} = ${formatKES(i.price * i.qty)}`)),
-      `Total: ${formatKES(snap.total)}`
+      ...((Array.isArray(snap.items) ? snap.items : items).map(i => `  - ${i.name} x${i.qty} = ${formatCurrency(i.price * i.qty)}`)),
+      `Total: ${formatCurrency(snap.total)}`
     ].join('\n');
     const blob = new Blob([lines], { type: 'text/plain' });
     const a = document.createElement('a');
@@ -729,7 +1498,7 @@ export default function Checkout() {
                 { text: 'Customer', style: 'metaBold', alignment: 'right' },
                 { text: form.name, style: 'meta', alignment: 'right' },
                 { text: form.phone, style: 'meta', alignment: 'right' },
-                form.delivery === 'delivery' ? { text: form.address, style: 'meta', alignment: 'right' } : null
+                form.delivery === 'delivery' ? { text: resolvedDeliveryLocation, style: 'meta', alignment: 'right' } : null
               ].filter(Boolean)
             ]
           },
@@ -748,8 +1517,8 @@ export default function Checkout() {
                 ...snap.items.map(i => [
                   { text: i.name, style: 'tableCell' },
                   { text: String(i.qty), style: 'tableCell', alignment: 'center' },
-                  { text: formatKES(i.price), style: 'tableCell', alignment: 'right' },
-                  { text: formatKES(i.price * i.qty), style: 'tableCell', alignment: 'right' }
+                  { text: formatCurrency(i.price), style: 'tableCell', alignment: 'right' },
+                  { text: formatCurrency(i.price * i.qty), style: 'tableCell', alignment: 'right' }
                 ])
               ]
             },
@@ -762,9 +1531,9 @@ export default function Checkout() {
                 width: 'auto',
                 table: {
                   body: [
-                    [ { text: 'Net (Excl VAT):', style: 'meta' }, { text: formatKES(snap.subtotal), style: 'meta', alignment: 'right' } ],
-                    [ { text: 'VAT 16%:', style: 'meta' }, { text: formatKES(snap.vat), style: 'meta', alignment: 'right' } ],
-                    [ { text: 'TOTAL (Incl):', style: 'totalLabel' }, { text: formatKES(snap.total), style: 'totalValue', alignment: 'right' } ]
+                    [ { text: 'Net (Excl VAT):', style: 'meta' }, { text: formatCurrency(snap.subtotal), style: 'meta', alignment: 'right' } ],
+                    [ { text: 'VAT 16%:', style: 'meta' }, { text: formatCurrency(snap.vat), style: 'meta', alignment: 'right' } ],
+                    [ { text: 'TOTAL (Incl):', style: 'totalLabel' }, { text: formatCurrency(snap.total), style: 'totalValue', alignment: 'right' } ]
                   ]
                 },
                 layout: 'noBorders',
@@ -813,12 +1582,12 @@ export default function Checkout() {
       `Date: ${new Date(snap.ts || Date.now()).toLocaleString()}`,
       `Customer: ${form.name}`,
       `Phone: ${form.phone}`,
-      form.delivery==='delivery' ? `Address: ${form.address}` : 'Pickup at store',
+  form.delivery==='delivery' ? `Address: ${resolvedDeliveryLocation}` : 'Pickup at store',
       '',
       'Items:'
     ].filter(Boolean);
-    (Array.isArray(snap.items) ? snap.items : items).forEach(i => pretty.push(` - ${i.name} x${i.qty} @ ${formatKES(i.price)} = ${formatKES(i.price*i.qty)}`));
-  pretty.push('', `Net (Excl VAT): ${formatKES(snap.subtotal)}`, `VAT (16%): ${formatKES(snap.vat)}`, `TOTAL (Incl): ${formatKES(snap.total)}`, '', 'Asante!');
+    (Array.isArray(snap.items) ? snap.items : items).forEach(i => pretty.push(` - ${i.name} x${i.qty} @ ${formatCurrency(i.price)} = ${formatCurrency(i.price*i.qty)}`));
+  pretty.push('', `Net (Excl VAT): ${formatCurrency(snap.subtotal)}`, `VAT (16%): ${formatCurrency(snap.vat)}`, `TOTAL (Incl): ${formatCurrency(snap.total)}`, '', 'Asante!');
   const res = await sendEmailMock({ orderRef: displayOrderRef, total: snap.total, phone: form.phone, body: pretty.join('\n') });
     if (res.sent) push('Email sent (mock)');
   }
@@ -937,6 +1706,7 @@ export default function Checkout() {
     }
 
     const now = Date.now();
+    const deliveryPayload = buildDeliveryPayload();
     const cartSignatureBefore = buildCartSignature(items);
     const cartItems = items.map((item, idx) => {
       const qty = Number.isFinite(Number(item.qty)) ? Number(item.qty) : 0;
@@ -1030,6 +1800,7 @@ export default function Checkout() {
         paymentMethod: paymentMethodCode,
         paymentProgress,
         couponCode: createdOrder?.couponCode ?? createdOrder?.coupon_code ?? coupon?.code ?? null,
+        delivery: createdOrder?.delivery ?? deliveryPayload ?? null,
       };
 
       setOrderSnapshot(snapshot);
@@ -1076,11 +1847,12 @@ export default function Checkout() {
           paymentProgress,
           snapshot,
           guestPaymentRef: null,
-          guestPaymentMethod: 'cash'
+          guestPaymentMethod: 'cash',
+          delivery: snapshot.delivery ?? deliveryPayload ?? null
         }, guestSessionId);
       } catch {}
 
-      push('Order placed. Please pay when your items arrive.', 'success');
+  push('Order placed. Please pay when your items arrive.', 'success');
     } catch (e) {
       if (createdOrder && hasCartBackup) {
         try {
@@ -1098,22 +1870,13 @@ export default function Checkout() {
       <section className="py-5">
         <div className="container">
           <div className="row justify-content-center">
-            <div className="col-lg-7">
-              <div className="card shadow-sm border-0">
-                <div className="card-body text-center p-5">
-                  <i className="bi bi-basket2-fill display-4 text-success mb-3" aria-hidden="true"></i>
-                  <h1 className="h4 mb-3">Your cart is empty</h1>
-                  <p className="text-muted mb-4">Add a few items to get started or review your recent orders.</p>
-                  <div className="d-flex flex-column flex-sm-row gap-2 justify-content-center">
-                    <Link to="/" className="btn btn-success d-flex align-items-center justify-content-center gap-1">
-                      <i className="bi bi-shop"></i>
-                      <span>Go Shopping</span>
-                    </Link>
-                    <Link to="/orders" className="btn btn-outline-secondary d-flex align-items-center justify-content-center gap-1">
-                      <i className="bi bi-receipt"></i>
-                      <span>Go to My Orders</span>
-                    </Link>
-                  </div>
+            <div className="col-md-8 col-lg-6">
+              <div className="card shadow-sm border-0 p-4 text-center">
+                <h2 className="h5 mb-3">Your cart is empty</h2>
+                <p className="text-muted mb-4">Add items to your cart before proceeding to checkout.</p>
+                <div className="d-flex justify-content-center gap-2 flex-wrap">
+                  <Link to="/products" className="btn btn-success btn-sm">Browse products</Link>
+                  <Link to="/cart" className="btn btn-outline-secondary btn-sm">Go to cart</Link>
                 </div>
               </div>
             </div>
@@ -1125,25 +1888,38 @@ export default function Checkout() {
 
   if (submitted && step === 3) {
     const snap = orderSnapshot || { items: [], total };
+    const receiptOrderRef = orderSnapshot?.orderNumber ?? orderSnapshot?.orderRef ?? displayOrderRef ?? orderRef;
+    const deliveryInfo = orderSnapshot?.delivery ?? buildDeliveryPayload();
+    const deliveryMode = (deliveryInfo?.mode ?? deliveryInfo?.type ?? form.delivery ?? '').toString().toUpperCase();
+    const isDeliveryOrder = deliveryMode === 'DELIVERY';
+    const baseAddress = (deliveryInfo?.locationLabel ?? deliveryInfo?.address ?? resolvedDeliveryLocation ?? '').trim();
+    const extraContext = (deliveryInfo?.context ?? '').trim();
+    const showContext = Boolean(extraContext) && (!baseAddress || !baseAddress.toLowerCase().includes(extraContext.toLowerCase()));
+    const combinedAddress = baseAddress || (showContext ? extraContext : '');
+    const contactPhone = (deliveryInfo?.contactPhone ?? form.deliveryContactPhone ?? form.phone ?? '').trim();
+    const contactEmail = (deliveryInfo?.contactEmail ?? form.deliveryContactEmail ?? '').trim();
+    const instructionsText = (deliveryInfo?.instructions ?? form.deliveryInstructions ?? '').trim();
+    const shopLabel = deliveryInfo?.shop?.name ?? deliveryInfo?.shopName ?? deliveryInfo?.shop?.label ?? '';
+    const distanceKm = coerceNumber(deliveryInfo?.estimatedDistanceKm ?? deliveryInfo?.distanceKm ?? deliveryInfo?.distance_km);
+    const etaMinutes = coerceNumber(deliveryInfo?.estimatedMinutes ?? deliveryInfo?.etaMinutes ?? deliveryInfo?.eta_minutes);
+    const deliveryFeeDisplay = Number.isFinite(snapshotDeliveryFee) ? snapshotDeliveryFee : coerceNumber(
+      deliveryInfo?.fee ??
+      deliveryInfo?.deliveryFee ??
+      deliveryInfo?.delivery_fee ??
+      deliveryInfo?.quote?.fee ??
+      deliveryInfo?.quote?.amount
+    );
     return (
-      <section>
+      <section className="container py-4">
         <h1 className="h3 mb-3">Order Confirmed</h1>
         <div className="card shadow-sm border-0 mb-4">
           <div className="card-body">
             <div className="d-flex flex-column flex-md-row justify-content-between mb-3 gap-2">
               <div>
                 <h2 className="h6 mb-1">Receipt</h2>
-                <p className="small text-muted mb-0">Ref: <strong>{displayOrderRef}</strong></p>
-                {orderSnapshot?.backendOrderId && (
-                  <p className="small text-muted mb-0">Order ID: #{orderSnapshot.backendOrderId}</p>
-                )}
+                <p className="small text-muted mb-0">Ref: <strong>{receiptOrderRef}</strong></p>
                 {paymentRef && (
-                  <p className="small text-muted mb-0">
-                    Payment: <strong>{paymentRef}</strong> ({resolvedPaymentLabel})
-                  </p>
-                )}
-                {!paymentRef && resolvedPaymentLabel && (
-                  <p className="small text-muted mb-0">Payment Method: {resolvedPaymentLabel}</p>
+                  <p className="small text-muted mb-0">Payment: <strong>{paymentRef}</strong> ({resolvedPaymentLabel})</p>
                 )}
                 <p className="small text-muted mb-0">Date: {new Date(snap.ts || Date.now()).toLocaleString()}</p>
               </div>
@@ -1151,16 +1927,21 @@ export default function Checkout() {
                 <p className="mb-0 fw-semibold">Customer</p>
                 <p className="small mb-0">{form.name}</p>
                 <p className="small mb-0">{form.phone}</p>
-                {form.delivery==='delivery' && <p className="small mb-0">Address: {form.address}</p>}
+                {form.delivery === 'delivery' && <p className="small mb-0">Address: {form.address}</p>}
               </div>
             </div>
             <div className="table-responsive">
               <table className="table table-sm align-middle mb-3">
                 <thead>
-                  <tr className="table-light"><th>Item</th><th className="text-center" style={{width:'70px'}}>Qty</th><th className="text-end" style={{width:'110px'}}>Price</th><th className="text-end" style={{width:'120px'}}>Subtotal</th></tr>
+                  <tr className="table-light">
+                    <th>Item</th>
+                    <th className="text-center" style={{ width: '70px' }}>Qty</th>
+                    <th className="text-end" style={{ width: '110px' }}>Price</th>
+                    <th className="text-end" style={{ width: '120px' }}>Subtotal</th>
+                  </tr>
                 </thead>
                 <tbody>
-                  {snap.items.map(i => (
+                  {(snap.items || []).map((i) => (
                     <tr key={i.id}>
                       <td>{i.name}</td>
                       <td className="text-center">{i.qty}</td>
@@ -1185,13 +1966,68 @@ export default function Checkout() {
                 </tfoot>
               </table>
             </div>
-            <p className="small text-muted">We will contact you on {form.phone}{form.delivery === 'delivery' ? ` and deliver to ${form.address}` : ' when your order is ready for pickup'}.</p>
+            {isDeliveryOrder && (
+              <div className="mt-4 pt-3 border-top">
+                <h3 className="h6 mb-3">Delivery details</h3>
+                <div className="row g-3 small">
+                  <div className="col-12 col-md-6">
+                    <p className="mb-1 text-muted text-uppercase fw-semibold">Address</p>
+                    <p className="mb-0">{combinedAddress || 'Not provided'}</p>
+                    {showContext && <p className="mb-0 text-muted">{extraContext}</p>}
+                  </div>
+                  <div className="col-12 col-md-6">
+                    <p className="mb-1 text-muted text-uppercase fw-semibold">Contact phone</p>
+                    <p className="mb-0">{contactPhone || 'Not provided'}</p>
+                    {contactEmail && <p className="mb-0 text-muted">Email: {contactEmail}</p>}
+                  </div>
+                  {shopLabel && (
+                    <div className="col-12 col-md-6">
+                      <p className="mb-1 text-muted text-uppercase fw-semibold">Prepared by</p>
+                      <p className="mb-0">{shopLabel}</p>
+                    </div>
+                  )}
+                  {(Number.isFinite(distanceKm) || Number.isFinite(etaMinutes)) && (
+                    <div className="col-12 col-md-6">
+                      <p className="mb-1 text-muted text-uppercase fw-semibold">Estimate</p>
+                      {Number.isFinite(distanceKm) && <p className="mb-0">~{distanceKm.toFixed(1)} km</p>}
+                      {Number.isFinite(etaMinutes) && <p className="mb-0">~{Math.round(etaMinutes)} minutes</p>}
+                    </div>
+                  )}
+                  {Number.isFinite(deliveryFeeDisplay) && (
+                    <div className="col-12 col-md-6">
+                      <p className="mb-1 text-muted text-uppercase fw-semibold">Delivery fee</p>
+                      <p className="mb-0">{formatKES(deliveryFeeDisplay)}</p>
+                    </div>
+                  )}
+                  {instructionsText && (
+                    <div className="col-12">
+                      <p className="mb-1 text-muted text-uppercase fw-semibold">Instructions</p>
+                      <p className="mb-0">{instructionsText}</p>
+                    </div>
+                  )}
+                </div>
+              </div>
+            )}
+            <p className="small text-muted">
+              We will contact you on {contactPhone || form.phone || 'your phone'}
+              {isDeliveryOrder
+                ? ` and deliver to ${combinedAddress || 'your chosen address'}`
+                : ' when your order is ready for pickup'}.
+            </p>
             <div className="d-flex flex-wrap gap-2 mt-2">
               <button onClick={exportSummary} className="btn btn-outline-secondary btn-sm"><i className="bi bi-filetype-txt me-1"></i>Text</button>
               <button onClick={exportPdf} className="btn btn-outline-secondary btn-sm"><i className="bi bi-filetype-pdf me-1"></i>PDF</button>
               <button onClick={mockEmail} className="btn btn-outline-secondary btn-sm"><i className="bi bi-envelope me-1"></i>Email</button>
-              <button onClick={()=>window.print()} className="btn btn-outline-secondary btn-sm"><i className="bi bi-printer me-1"></i>Print</button>
-              <button onClick={() => { sessionStorage.removeItem('checkout'); navigate('/'); }} className="btn btn-success btn-sm ms-auto"><i className="bi bi-house-door me-1"></i>Home</button>
+              <button onClick={() => window.print()} className="btn btn-outline-secondary btn-sm"><i className="bi bi-printer me-1"></i>Print</button>
+              <button
+                onClick={() => {
+                  try { sessionStorage.removeItem('checkout'); } catch {}
+                  navigate('/');
+                }}
+                className="btn btn-success btn-sm ms-auto"
+              >
+                <i className="bi bi-house-door me-1"></i>Home
+              </button>
             </div>
           </div>
         </div>
@@ -1200,7 +2036,8 @@ export default function Checkout() {
   }
 
   return (
-  <section className="container py-3 px-3 px-sm-4">
+    <>
+      <section className="container py-3 px-3 px-sm-4">
       <h1 id="checkout-heading" tabIndex="-1" className="h3 mb-3">Checkout</h1>
       {!isAuthenticated && (
         <div className="alert alert-info d-flex flex-column flex-md-row align-items-md-center gap-2" role="status">
@@ -1277,11 +2114,195 @@ export default function Checkout() {
                 </div>
               )}
               {form.delivery === 'delivery' && (
-                <div className="mb-3">
-                  <label className="form-label">Address</label>
-                  <textarea placeholder="Estate, Street, House no." aria-invalid={!!errors.address} {...register('address', addressRules(form.delivery === 'delivery'))} className={`form-control ${errors.address ? 'is-invalid' : touchedFields.address ? 'is-valid' : ''}`} />
-                  {errors.address && <div className="invalid-feedback d-block small">{errors.address.message}</div>}
-                </div>
+                <>
+                  <div className="mb-3 position-relative">
+                    <label className="form-label">Delivery location</label>
+                    <div className="position-relative">
+                      <div className="input-group">
+                        <input
+                          type="text"
+                          placeholder="Search for your estate, street or landmark"
+                          aria-invalid={!!errors.address}
+                          {...addressField}
+                          onChange={(event) => {
+                            addressField.onChange(event);
+                            const nextValue = event.target.value;
+                            setLocationQuery(nextValue);
+                            if (selectedAddressId) {
+                              setSelectedAddressId(null);
+                            }
+                            updateDeliveryState(prev => {
+                              const trimmedPrev = (prev.locationLabel || '').trim();
+                              const trimmedNext = (nextValue || '').trim();
+                              if (trimmedPrev === trimmedNext) {
+                                return { locationLabel: nextValue };
+                              }
+                              return {
+                                locationLabel: nextValue,
+                                searchQuery: nextValue,
+                                lat: null,
+                                lng: null,
+                                selectedResult: null,
+                                shopId: null,
+                                shop: null,
+                                quote: null,
+                                distanceKm: null,
+                                estimatedMinutes: null,
+                                context: '',
+                                fee: null,
+                                availabilityReason: null,
+                                availabilityMessage: null
+                              };
+                            });
+                          }}
+                          onBlur={(event) => {
+                            addressField.onBlur(event);
+                          }}
+                          autoComplete="off"
+                          className={`form-control ${errors.address ? 'is-invalid' : touchedFields.address ? 'is-valid' : ''}`}
+                        />
+                        <button
+                          type="button"
+                          className="btn btn-outline-success"
+                          onClick={() => setMapPickerOpen(true)}
+                          aria-label="Pick location on map"
+                        >
+                          <i className="bi bi-map"></i>
+                          <span className="d-none d-sm-inline ms-1">Map</span>
+                        </button>
+                      </div>
+                      {locationResults.length > 0 && (locationQuery || '').trim().length >= 3 && !hasDeliveryCoordinates && (
+                        <ul className="list-group shadow-sm position-absolute w-100 mt-1" style={{ zIndex: 40 }}>
+                          {locationResults.map((result) => {
+                            const label = resolveGeoLabel(result);
+                            const context = resolveGeoContext(result);
+                            const key = resolvePlaceId(result) ?? `${label}-${context}` ?? JSON.stringify(result);
+                            return (
+                              <li
+                                key={key}
+                                className="list-group-item list-group-item-action d-flex flex-column"
+                                role="button"
+                                onMouseDown={(event) => {
+                                  event.preventDefault();
+                                  handleLocationSelect(result);
+                                }}
+                              >
+                                <span className="fw-semibold">{label || 'Unnamed location'}</span>
+                                {context && <span className="small text-muted">{context}</span>}
+                              </li>
+                            );
+                          })}
+                        </ul>
+                      )}
+                    </div>
+                    {locationLoading && <div className="form-text small">Searching nearby locations…</div>}
+                    {locationError && <div className="invalid-feedback d-block small">Could not search locations. Please check your connection.</div>}
+                    {errors.address && <div className="invalid-feedback d-block small">{errors.address.message}</div>}
+                    {!errors.address && deliveryState.locationLabel && (
+                      <div className="form-text small">We'll deliver to <strong>{deliveryState.locationLabel}</strong>.</div>
+                    )}
+                  </div>
+                    <div className="mb-3">
+                      <div className="d-flex justify-content-between align-items-center mb-2">
+                        <label className="form-label mb-0">Delivery contact</label>
+                        <span className="small text-muted">Shared with the rider if needed</span>
+                      </div>
+                      <div className="row g-3">
+                        <div className="col-12 col-md-6">
+                          <label className="form-label small text-muted" htmlFor="checkout-contact-phone">Alternate phone (optional)</label>
+                          <input
+                            id="checkout-contact-phone"
+                            type="tel"
+                            placeholder="07xx xxx xxx"
+                            className={`form-control ${errors.deliveryContactPhone ? 'is-invalid' : touchedFields.deliveryContactPhone ? 'is-valid' : ''}`}
+                            {...register('deliveryContactPhone', optionalPhoneRules)}
+                          />
+                          {errors.deliveryContactPhone && <div className="invalid-feedback d-block small">{errors.deliveryContactPhone.message}</div>}
+                          {!errors.deliveryContactPhone && <div className="form-text small">Leave blank to use your main phone ({form.phone || 'N/A'}).</div>}
+                        </div>
+                        <div className="col-12 col-md-6">
+                          <label className="form-label small text-muted" htmlFor="checkout-contact-email">Contact email (optional)</label>
+                          <input
+                            id="checkout-contact-email"
+                            type="email"
+                            placeholder="name@example.com"
+                            className={`form-control ${errors.deliveryContactEmail ? 'is-invalid' : touchedFields.deliveryContactEmail ? 'is-valid' : ''}`}
+                            {...register('deliveryContactEmail', optionalEmailRules)}
+                          />
+                          {errors.deliveryContactEmail && <div className="invalid-feedback d-block small">{errors.deliveryContactEmail.message}</div>}
+                        </div>
+                        <div className="col-12">
+                          <label className="form-label small text-muted" htmlFor="checkout-delivery-notes">Delivery instructions (optional)</label>
+                          <textarea
+                            id="checkout-delivery-notes"
+                            rows={3}
+                            placeholder="Gate code, drop-off notes, reach-out preference…"
+                            className={`form-control ${errors.deliveryInstructions ? 'is-invalid' : touchedFields.deliveryInstructions ? 'is-valid' : ''}`}
+                            {...register('deliveryInstructions', { maxLength: { value: 1000, message: 'Keep delivery notes under 1000 characters.' } })}
+                          ></textarea>
+                          {errors.deliveryInstructions && <div className="invalid-feedback d-block small">{errors.deliveryInstructions.message}</div>}
+                        </div>
+                      </div>
+                    </div>
+                  <div className="mb-3">
+                    <div className="d-flex justify-content-between align-items-center mb-2">
+                      <label className="form-label mb-0">Choose a shop</label>
+                      {deliveryState.distanceKm && Number.isFinite(deliveryState.distanceKm) && (
+                        <span className="badge bg-light text-secondary fw-normal">Approx. {Number(deliveryState.distanceKm).toFixed(1)} km away</span>
+                      )}
+                    </div>
+                    {deliveryShopsLoading && <p className="small text-muted mb-2">Finding shops near you…</p>}
+                    {deliveryShopsError && (
+                      <div className="alert alert-warning small" role="alert">{deliveryShopsError.message || 'Unable to load delivery shops.'}</div>
+                    )}
+                    {!deliveryShopsLoading && !deliveryShopsError && deliveryShops.length === 0 && (
+                      <div className="alert alert-info small" role="status">No delivery shops are available for that location yet. Try a different estate or choose pickup.</div>
+                    )}
+                    <div className="d-flex flex-column gap-2">
+                      {deliveryShops.map((shop) => {
+                        const shopId = shop.id ?? shop.shopId;
+                        const selected = String(selectedShopId) === String(shopId);
+                        const distance = coerceNumber(shop.distanceKm ?? shop.distance_km ?? shop.distance ?? shop.metrics?.distanceKm);
+                        const timing = coerceNumber(shop.etaMinutes ?? shop.estimatedMinutes ?? shop.eta_minutes);
+                        const label = shop.displayName ?? shop.name ?? shop.label ?? `Shop ${shopId}`;
+                        const subtitle = shop.addressLine ?? shop.address ?? shop.locationLabel ?? shop.city ?? null;
+                        return (
+                          <button
+                            key={shopId ?? label}
+                            type="button"
+                            className={`btn btn-light border text-start w-100 d-flex justify-content-between align-items-start gap-2 ${selected ? 'border-success shadow-sm' : ''}`}
+                            onClick={() => handleShopSelect(shop)}
+                          >
+                            <span>
+                              <span className="fw-semibold d-block">{label}</span>
+                              {subtitle && <span className="small text-muted d-block">{subtitle}</span>}
+                              {distance && (
+                                <span className="badge rounded-pill bg-light text-secondary fw-normal mt-1">{distance.toFixed(1)} km</span>
+                              )}
+                            </span>
+                            <span className="form-check">
+                              <input className="form-check-input" type="radio" checked={selected} onChange={() => handleShopSelect(shop)} />
+                            </span>
+                          </button>
+                        );
+                      })}
+                    </div>
+                  </div>
+                  <div className="mb-3">
+                    <label className="form-label mb-1">Delivery estimate</label>
+                    {deliveryQuoteLoading && <p className="small text-muted mb-0">Calculating delivery cost…</p>}
+                    {deliveryQuoteError && <div className="alert alert-warning small" role="alert">{deliveryQuoteError.message || 'Could not calculate delivery cost.'}</div>}
+                    {!deliveryQuoteLoading && !deliveryQuoteError && (
+                      <div className="small text-muted">
+                        <div>Delivery fee: <strong>{formatCurrency(Number.isFinite(deliveryFee) ? deliveryFee : 0)}</strong></div>
+                        {deliveryState.estimatedMinutes && Number.isFinite(deliveryState.estimatedMinutes) && (
+                          <div>ETA: about {Math.round(deliveryState.estimatedMinutes)} minutes after confirmation.</div>
+                        )}
+                        {!deliveryState.quote && <div>Select a location to get your delivery quote.</div>}
+                      </div>
+                    )}
+                  </div>
+                </>
               )}
               <div className="d-flex gap-2 flex-wrap">
                 <button type="submit" className="btn btn-success flex-grow-1 flex-sm-grow-0">Continue</button>
@@ -1337,7 +2358,7 @@ export default function Checkout() {
                     )}
                   </div>
                   {mm.status==='pending' && <p className="small text-muted mt-2">Awaiting confirmation on your phone…</p>}
-                  {mm.status==='timeout' && <p className="small text-danger mt-2">Timed out waiting for confirmation. Try again.</p>}
+                  {modalPaymentState==='timeout' && <p className="small text-danger mt-2">Timed out waiting for confirmation. Try again.</p>}
                   {mm.error && <p className="small text-danger mt-2">{mm.error}</p>}
                 </>
               )}
@@ -1393,7 +2414,7 @@ export default function Checkout() {
                     return (
                       <li key={i.id ?? `${label}-${qty}`} className="d-flex justify-content-between border-bottom py-1">
                         <span>{label} × {qty}</span>
-                        <span>{formatKES(price * qty)}</span>
+                        <span>{formatCurrency(price * qty)}</span>
                       </li>
                     );
                   })}
@@ -1403,47 +2424,61 @@ export default function Checkout() {
             <div className="mt-3 small">
               <div className="d-flex justify-content-between">
                 <span>Subtotal</span>
-                <span>{formatKES(displaySubtotal)}</span>
+                <span>{formatCurrency(displaySubtotal)}</span>
               </div>
               {displayDiscount > 0 && (
                 <div className="d-flex justify-content-between text-success fw-semibold mt-1">
                   <span>Coupon savings</span>
-                  <span>-{formatKES(displayDiscount)}</span>
+                  <span>-{formatCurrency(displayDiscount)}</span>
+                </div>
+              )}
+              {shouldShowDeliveryFee && (
+                <div className="d-flex justify-content-between mt-1">
+                  <span>Delivery fee</span>
+                  <span>{formatCurrency(Number.isFinite(snapshotDeliveryFee) ? snapshotDeliveryFee : 0)}</span>
                 </div>
               )}
               <div className="d-flex justify-content-between fw-semibold mt-2">
                 <span>Total due</span>
-                <span>{formatKES(displayTotal)}</span>
+                <span>{formatCurrency(totalWithDelivery)}</span>
               </div>
               <p className="text-muted small mb-0 mt-1">Taxes included where applicable.</p>
             </div>
           </div>
         </div>
       </div>
-      <PaymentOptionModal
-        option={selectedOption}
-        open={modalOpen}
-        onClose={()=>setModalOpen(false)}
-        onInitiate={initiateFromOption}
-        onReconcile={async (phone, amountVal)=>{
-          if (!selectedOption) return;
-          const backendOrderId = orderSnapshot?.backendOrderId;
-          if (!backendOrderId) { push('Create order first by starting payment', 'error'); return; }
-          try {
-            await mm.reconcile({ orderId: backendOrderId, provider: selectedOption.provider, phoneNumber: phone || undefined, amount: amountVal ? Number(amountVal) : undefined });
-          } catch {/* handled in hook */}
-        }}
-  reconciling={modalPaymentState==='reconciling'}
-  paymentStatus={effectivePaymentStatus}
-  loading={modalPaymentState==='initiating'}
-  paymentHookStatus={modalPaymentState}
-        phone={modalPhone}
-        setPhone={setModalPhone}
-        accountRef={modalAccountRef}
-        setAccountRef={setModalAccountRef}
-        amount={formattedSnapshotTotal}
+        <PaymentOptionModal
+          option={selectedOption}
+          open={modalOpen}
+          onClose={()=>setModalOpen(false)}
+          onInitiate={initiateFromOption}
+          onReconcile={async (phone, amountVal)=>{
+            if (!selectedOption) return;
+            const backendOrderId = orderSnapshot?.backendOrderId;
+            if (!backendOrderId) { push('Create order first by starting payment', 'error'); return; }
+            try {
+              await mm.reconcile({ orderId: backendOrderId, provider: selectedOption.provider, phoneNumber: phone || undefined, amount: amountVal ? Number(amountVal) : undefined });
+            } catch {/* handled in hook */}
+          }}
+          reconciling={modalPaymentState==='reconciling'}
+          paymentStatus={effectivePaymentStatus}
+          loading={modalPaymentState==='initiating'}
+          paymentHookStatus={modalPaymentState}
+          phone={modalPhone}
+          setPhone={setModalPhone}
+          accountRef={modalAccountRef}
+          setAccountRef={setModalAccountRef}
+          amount={formattedSnapshotTotal}
+        />
+      </section>
+      <MapPickerModal
+        open={mapPickerOpen}
+        initialValue={mapInitialSelection}
+        onClose={() => setMapPickerOpen(false)}
+        onSelect={handleMapConfirm}
+        title="Pin delivery location"
+        confirmLabel="Use this location"
       />
-    </section>
+    </>
   );
 }
-// ReconcileForm removed; functionality moved into PaymentOptionModal

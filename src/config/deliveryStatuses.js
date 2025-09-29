@@ -1,0 +1,9 @@
+export const DELIVERY_STATUSES = [
+  'REQUESTED',
+  'ASSIGNED',
+  'EN_ROUTE',
+  'DELIVERED',
+  'CANCELLED'
+];
+
+export default DELIVERY_STATUSES;

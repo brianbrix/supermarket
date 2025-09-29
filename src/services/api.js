@@ -91,6 +91,29 @@ export const api = {
     markFailed: (orderId, payload) => request(`/payments/order/${orderId}/fail`, { method: 'POST', body: JSON.stringify(payload ?? {}) }),
     options: () => request('/payments/options')
   },
+  delivery: {
+    shops: ({ includeInactive = false, lat, lng } = {}) => {
+      const params = new URLSearchParams();
+      if (includeInactive) params.set('includeInactive', 'true');
+      if (lat != null) params.set('lat', lat);
+      if (lng != null) params.set('lng', lng);
+      const qs = params.toString();
+      return request(`/delivery/shops${qs ? `?${qs}` : ''}`);
+    },
+    quote: ({ lat, lng, cartTotal, shopId } = {}) => request('/delivery/quote', {
+      method: 'POST',
+      body: JSON.stringify({ lat, lng, cartTotal, shopId })
+    }),
+    geoSearch: (q, { limit = 5 } = {}) => {
+      if (!q || String(q).trim().length < 3) {
+        return Promise.resolve({ query: q, results: [] });
+      }
+      const params = new URLSearchParams();
+      params.set('q', q);
+      if (limit != null) params.set('limit', limit);
+      return request(`/geo/search?${params.toString()}`);
+    }
+  },
   products: {
     list: (page=0,size=10) => request(`/products?page=${page}&size=${size}`),
     get: (id) => request(`/products/${id}`).then(res => res?.data ?? res),
@@ -281,6 +304,37 @@ export const api = {
         delete: (id) => request(`/admin/payment-options/${id}`, { method:'DELETE' })
       }
     },
+      deliveryShops: {
+        list: ({ page = 0, size = 20, q, active, lat, lng } = {}) => {
+          const params = new URLSearchParams();
+          params.set('page', page);
+          params.set('size', size);
+          if (q) params.set('q', q);
+          if (active !== undefined && active !== null) params.set('active', active);
+          if (lat != null) params.set('lat', lat);
+          if (lng != null) params.set('lng', lng);
+          return request(`/admin/delivery/shops?${params.toString()}`);
+        },
+        create: (payload) => request('/admin/delivery/shops', { method: 'POST', body: JSON.stringify(payload) }),
+        update: (id, payload) => request(`/admin/delivery/shops/${id}`, { method: 'PUT', body: JSON.stringify(payload) }),
+        remove: (id) => request(`/admin/delivery/shops/${id}`, { method: 'DELETE' }),
+        activate: (id) => request(`/admin/delivery/shops/${id}/activate`, { method: 'POST' }),
+        deactivate: (id) => request(`/admin/delivery/shops/${id}/deactivate`, { method: 'POST' })
+      },
+      deliveries: {
+        list: ({ page = 0, size = 20, status, shopId, from, to } = {}) => {
+          const params = new URLSearchParams();
+          params.set('page', page);
+          params.set('size', size);
+          if (status) params.set('status', status);
+          if (shopId) params.set('shopId', shopId);
+          if (from) params.set('from', from);
+          if (to) params.set('to', to);
+          return request(`/admin/deliveries?${params.toString()}`);
+        },
+        get: (id) => request(`/admin/deliveries/${id}`),
+        updateStatus: (id, payload) => request(`/admin/deliveries/${id}/status`, { method: 'PUT', body: JSON.stringify(payload) })
+      },
     coupons: {
       list: ({ page = 0, size = 20, search, status, active, startsFrom, endsTo, sort, direction } = {}) => {
         const params = new URLSearchParams();

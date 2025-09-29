@@ -21,6 +21,10 @@ use App\Http\Controllers\API\SystemSettingController as PublicSystemSettingContr
 use App\Http\Controllers\API\CouponController;
 use App\Http\Controllers\Admin\CouponAdminController;
 use App\Http\Controllers\API\UserPreferenceController;
+use App\Http\Controllers\API\DeliveryController;
+use App\Http\Controllers\API\GeocodingController;
+use App\Http\Controllers\Admin\DeliveryShopAdminController;
+use App\Http\Controllers\Admin\DeliveryAdminController;
 
 Route::get('/products', [ProductController::class, 'index']);
 Route::get('/products/price-range', [ProductController::class, 'priceRange']);
@@ -44,6 +48,9 @@ Route::post('/payments/order/{orderId}/fail', [PaymentController::class, 'failBy
 Route::get('/payments/options', [PaymentOptionPublicController::class, 'index']);
 Route::get('/settings', [PublicSystemSettingController::class, 'index']);
 Route::post('/coupons/preview', [CouponController::class, 'preview']);
+Route::get('/delivery/shops', [DeliveryController::class, 'shops']);
+Route::post('/delivery/quote', [DeliveryController::class, 'quote']);
+Route::get('/geo/search', [GeocodingController::class, 'search'])->middleware('throttle:30,1');
 // Callback webhooks (no auth)
 Route::post('/payments/mpesa/callback', [PaymentController::class, 'mpesaCallback']);
 Route::post('/payments/airtel/callback', [PaymentController::class, 'airtelCallback']);
@@ -121,4 +128,15 @@ Route::middleware(['auth:sanctum','role:ADMIN'])->prefix('admin')->group(functio
     Route::post('/categories', [CategoryController::class, 'store']);
     Route::put('/categories/{category}', [CategoryController::class, 'update']);
     Route::delete('/categories/{category}', [CategoryController::class, 'destroy']);
+
+    Route::get('/delivery/shops', [DeliveryShopAdminController::class, 'index']);
+    Route::post('/delivery/shops', [DeliveryShopAdminController::class, 'store']);
+    Route::put('/delivery/shops/{deliveryShop}', [DeliveryShopAdminController::class, 'update']);
+    Route::delete('/delivery/shops/{deliveryShop}', [DeliveryShopAdminController::class, 'destroy']);
+    Route::post('/delivery/shops/{deliveryShop}/activate', [DeliveryShopAdminController::class, 'activate']);
+    Route::post('/delivery/shops/{deliveryShop}/deactivate', [DeliveryShopAdminController::class, 'deactivate']);
+
+    Route::get('/deliveries', [DeliveryAdminController::class, 'index']);
+    Route::get('/deliveries/{delivery}', [DeliveryAdminController::class, 'show']);
+    Route::put('/deliveries/{delivery}/status', [DeliveryAdminController::class, 'updateStatus']);
 });

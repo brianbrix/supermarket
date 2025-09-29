@@ -2,6 +2,7 @@ import { useEffect, useMemo, useState } from 'react';
 import { useTheme } from '../../context/ThemeContext.jsx';
 import { useToast } from '../../context/ToastContext.jsx';
 import { useAuth } from '../../context/AuthContext.jsx';
+import SavedAddressEditor from '../../components/account/SavedAddressEditor.jsx';
 
 const MAX_ADDRESSES = 5;
 
@@ -20,6 +21,57 @@ function generateAddressId() {
   return `addr-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 8)}`;
 }
 
+function normalizeAddress(address = {}, fallbackLabel = 'Saved address') {
+  const coerceNumber = (value) => {
+    if (value === null || value === undefined || value === '') return null;
+    const numeric = Number(value);
+    return Number.isFinite(numeric) ? numeric : null;
+  };
+  return {
+    id: address.id ?? generateAddressId(),
+    label: address.label ?? fallbackLabel,
+    details: address.details ?? '',
+    context: address.context ?? '',
+    lat: coerceNumber(address.lat ?? address.latitude),
+    lng: coerceNumber(address.lng ?? address.longitude),
+    placeId: address.placeId ?? address.place_id ?? null,
+    contactName: address.contactName ?? '',
+    contactPhone: address.contactPhone ?? '',
+    contactEmail: address.contactEmail ?? '',
+    instructions: address.instructions ?? '',
+  };
+}
+
+function prepareAddressForSave(address) {
+  if (!address) return null;
+  const trimmedDetails = (address.details || '').trim();
+  if (!trimmedDetails) return null;
+  const trimmedLabel = (address.label || '').trim();
+  const trimOrNull = (value) => {
+    if (value == null) return null;
+    const trimmed = String(value).trim();
+    return trimmed === '' ? null : trimmed;
+  };
+  const toNumberOrNull = (value) => {
+    if (value === null || value === undefined || value === '') return null;
+    const numeric = Number(value);
+    return Number.isFinite(numeric) ? Number(numeric) : null;
+  };
+  return {
+    id: address.id || generateAddressId(),
+    label: trimmedLabel || 'Saved address',
+    details: trimmedDetails,
+    context: trimOrNull(address.context),
+    lat: toNumberOrNull(address.lat),
+    lng: toNumberOrNull(address.lng),
+    placeId: trimOrNull(address.placeId),
+    contactName: trimOrNull(address.contactName),
+    contactPhone: trimOrNull(address.contactPhone),
+    contactEmail: trimOrNull(address.contactEmail),
+    instructions: trimOrNull(address.instructions),
+  };
+}
+
 export default function AccountSettings() {
   const { theme, setTheme } = useTheme();
   const { push } = useToast();
@@ -36,7 +88,7 @@ export default function AccountSettings() {
       orderUpdates: preferences.orderUpdates ?? prev.orderUpdates,
       marketing: preferences.marketing ?? prev.marketing,
       addresses: Array.isArray(preferences.addresses)
-        ? preferences.addresses.map(address => ({ ...address }))
+        ? preferences.addresses.map((address, index) => normalizeAddress(address, `Address ${index + 1}`))
         : [],
     }));
   }, [preferences]);
@@ -55,14 +107,6 @@ export default function AccountSettings() {
     }
   }
 
-  function handleAddressFieldChange(index, field, value) {
-    setForm(prev => {
-      const addresses = [...prev.addresses];
-      addresses[index] = { ...addresses[index], [field]: value };
-      return { ...prev, addresses };
-    });
-  }
-
   function handleAddAddress() {
     setForm(prev => {
       if (prev.addresses.length >= MAX_ADDRESSES) return prev;
@@ -70,11 +114,11 @@ export default function AccountSettings() {
         ...prev,
         addresses: [
           ...prev.addresses,
-          {
+          normalizeAddress({
             id: generateAddressId(),
             label: `Address ${prev.addresses.length + 1}`,
             details: '',
-          },
+          }, `Address ${prev.addresses.length + 1}`),
         ],
       };
     });
@@ -87,17 +131,20 @@ export default function AccountSettings() {
     }));
   }
 
+  function handleAddressUpdate(id, nextAddress) {
+    setForm(prev => ({
+      ...prev,
+      addresses: prev.addresses.map(address => (address.id === id ? normalizeAddress(nextAddress, address.label) : address)),
+    }));
+  }
+
   async function handleSave(e) {
     e.preventDefault();
     try {
       setSaving(true);
       const sanitizedAddresses = form.addresses
-        .map(address => ({
-          id: address.id || generateAddressId(),
-          label: (address.label || '').trim() || 'Saved address',
-          details: (address.details || '').trim(),
-        }))
-        .filter(address => address.details.length > 0)
+        .map(prepareAddressForSave)
+        .filter(Boolean)
         .slice(0, MAX_ADDRESSES);
 
       const saved = await updatePreferences({
@@ -109,7 +156,9 @@ export default function AccountSettings() {
       });
       setForm({
         ...saved,
-        addresses: Array.isArray(saved.addresses) ? saved.addresses.map(address => ({ ...address })) : [],
+        addresses: Array.isArray(saved.addresses)
+          ? saved.addresses.map((address, index) => normalizeAddress(address, `Address ${index + 1}`))
+          : [],
       });
   setTheme(saved.themePreference, 'user');
       push('Account preferences saved', 'info');
@@ -124,7 +173,9 @@ export default function AccountSettings() {
     if (preferences) {
       setForm({
         ...preferences,
-        addresses: Array.isArray(preferences.addresses) ? preferences.addresses.map(address => ({ ...address })) : [],
+        addresses: Array.isArray(preferences.addresses)
+          ? preferences.addresses.map((address, index) => normalizeAddress(address, `Address ${index + 1}`))
+          : [],
       });
       return;
     }
@@ -194,41 +245,14 @@ export default function AccountSettings() {
             {form.addresses.length === 0 && (
               <p className="text-muted small mb-0">You haven’t saved any delivery addresses yet. Add your home or office for faster ordering.</p>
             )}
-            {form.addresses.map((address, index) => (
-              <div key={address.id} className="border rounded p-3 position-relative">
-                <div className="d-flex flex-column flex-md-row gap-3">
-                  <div className="flex-fill">
-                    <label className="form-label small text-muted" htmlFor={`address-label-${address.id}`}>Label</label>
-                    <input
-                      id={`address-label-${address.id}`}
-                      type="text"
-                      className="form-control form-control-sm"
-                      disabled={isBusy}
-                      value={address.label}
-                      onChange={(e) => handleAddressFieldChange(index, 'label', e.target.value)}
-                    />
-                  </div>
-                  <div className="flex-fill">
-                    <label className="form-label small text-muted" htmlFor={`address-details-${address.id}`}>Address details</label>
-                    <textarea
-                      id={`address-details-${address.id}`}
-                      className="form-control form-control-sm"
-                      rows={3}
-                      disabled={isBusy}
-                      value={address.details}
-                      onChange={(e) => handleAddressFieldChange(index, 'details', e.target.value)}
-                    ></textarea>
-                  </div>
-                </div>
-                <button
-                  type="button"
-                  className="btn btn-outline-danger btn-sm position-absolute top-0 end-0 mt-2 me-2"
-                  onClick={() => handleRemoveAddress(address.id)}
-                  disabled={isBusy}
-                >
-                  Remove
-                </button>
-              </div>
+            {form.addresses.map(address => (
+              <SavedAddressEditor
+                key={address.id}
+                value={address}
+                onChange={(next) => handleAddressUpdate(address.id, next)}
+                onRemove={handleRemoveAddress}
+                disabled={isBusy}
+              />
             ))}
             <div className="d-flex flex-wrap gap-2">
               <button type="button" className="btn btn-outline-primary btn-sm" onClick={handleAddAddress} disabled={!canAddAddress || isBusy}>

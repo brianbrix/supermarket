@@ -290,7 +290,12 @@ class PaymentService
     protected function progressOrder(Payment $payment): void
     {
         $order = $payment->order; // relation lazy loaded if not loaded
-        if ($order && $order->status === 'PENDING' && $payment->status === PaymentStatus::SUCCESS->value) {
+        if (!$order || $payment->status !== PaymentStatus::SUCCESS->value) {
+            return;
+        }
+
+        $currentStatus = strtoupper($order->status ?? '');
+        if (in_array($currentStatus, ['PENDING', 'FAILED'], true)) {
             $order->status = 'PROCESSING';
             $order->save();
         }

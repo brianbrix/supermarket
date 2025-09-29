@@ -6,7 +6,6 @@ import ImageWithFallback from './ImageWithFallback.jsx';
 
 export default function ProductCard({ product }) {
   const formatCurrency = useCurrencyFormatter();
-  const formatKES = formatCurrency;
   const { addItem } = useCart();
   const { push } = useToast();
   const location = useLocation();
@@ -42,7 +41,7 @@ export default function ProductCard({ product }) {
         </div>
       </Link>
       <div className="px-3 pb-3 mt-auto">
-        <p className="fw-semibold mb-2">{formatKES(product.price)} <span className="text-secondary small">/{product.unit}</span></p>
+        <p className="fw-semibold mb-2">{formatCurrency(product.price)} <span className="text-secondary small">/{product.unit}</span></p>
         <button onClick={handleAdd} className="btn btn-success w-100 btn-sm" disabled={product.stock === 0}>Add</button>
       </div>
     </div>

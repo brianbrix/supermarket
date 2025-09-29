@@ -118,38 +118,37 @@ function formatWithSettings(currency, amount, override = {}) {
   };
   const locale = options.locale || 'en-KE';
   const currencyCode = (options.code || 'KES').toUpperCase();
-  const minDigits = typeof options.minimumFractionDigits === 'number' ? Math.max(0, Math.min(4, options.minimumFractionDigits)) : 0;
+  const minDigits = typeof options.minimumFractionDigits === 'number'
+    ? Math.max(0, Math.min(4, options.minimumFractionDigits))
+    : 0;
   const target = Number.isFinite(amount) ? Number(amount) : 0;
+  const desiredSymbol = options.symbol?.trim();
 
-  let formatted;
   try {
     const formatter = new Intl.NumberFormat(locale, {
       style: 'currency',
       currency: currencyCode,
       minimumFractionDigits: minDigits,
     });
-    formatted = formatter.format(target);
+
+    if (!desiredSymbol) {
+      return formatter.format(target);
+    }
+
+    if (typeof formatter.formatToParts === 'function') {
+      const parts = formatter.formatToParts(target).map(part => (
+        part.type === 'currency' ? desiredSymbol : part.value
+      ));
+      return normalizeCurrencySpacing(parts.join(''));
+    }
+
+    const fallbackFormatted = formatter.format(target);
+    return normalizeCurrencySpacing(replaceCurrencyToken(fallbackFormatted, currencyCode, desiredSymbol));
   } catch {
-    formatted = fallbackFormat(target, { code: currencyCode, symbol: options.symbol });
+    return normalizeCurrencySpacing(
+      fallbackFormat(target, { code: currencyCode, symbol: desiredSymbol || options.symbol })
+    );
   }
-
-  const desiredSymbol = options.symbol?.trim();
-  if (!desiredSymbol) {
-    return formatted;
-  }
-
-  const containsDesiredSymbol = new RegExp(`\\b${escapeRegExp(desiredSymbol)}\\b`, 'u').test(formatted);
-  if (containsDesiredSymbol) {
-    return formatted;
-  }
-
-  const cleaned = formatted.replace(new RegExp(`\\p{Sc}|${currencyCode}`, 'gu'), '').trim();
-  const numericWithSeparators = cleaned.replace(/\s+/g, '');
-  const symbolFirst = /^[^0-9-]/.test(formatted.trim());
-  const spacedNumeric = numericWithSeparators.replace(/(\d)([A-Za-z])/g, '$1 $2');
-  return symbolFirst
-    ? `${desiredSymbol} ${spacedNumeric}`.replace(/\s+/g, ' ').trim()
-    : `${spacedNumeric} ${desiredSymbol}`.replace(/\s+/g, ' ').trim();
 }
 
 function fallbackFormat(amount, { symbol = 'KES', code = 'KES' } = {}) {
@@ -159,6 +158,23 @@ function fallbackFormat(amount, { symbol = 'KES', code = 'KES' } = {}) {
 
 function escapeRegExp(value = '') {
   return value.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+}
+
+function replaceCurrencyToken(formatted, currencyCode, desiredSymbol) {
+  if (!desiredSymbol) return formatted;
+  const tokenPattern = new RegExp(`(\\p{Sc}|${escapeRegExp(currencyCode)}|[A-Za-z]{2,4})`, 'u');
+  if (tokenPattern.test(formatted)) {
+    return formatted.replace(tokenPattern, desiredSymbol);
+  }
+  return `${desiredSymbol} ${formatted}`;
+}
+
+function normalizeCurrencySpacing(value) {
+  if (!value) return value;
+  return value
+    .replace(/\u00A0/g, ' ')
+    .replace(/\s{2,}/g, ' ')
+    .trim();
 }
 
 function normalizeString(value) {

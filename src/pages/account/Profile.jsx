@@ -10,7 +10,6 @@ export default function Profile() {
   const { user, refreshProfile } = useAuth();
   const { push } = useToast();
   const formatCurrency = useCurrencyFormatter();
-  const formatKES = formatCurrency;
   const [orders, setOrders] = useState([]);
   const [ordersMeta, setOrdersMeta] = useState({ totalElements: 0, page: 0 });
   const [loadingOrders, setLoadingOrders] = useState(true);
@@ -99,7 +98,7 @@ export default function Profile() {
         <div className="card flex-fill border-0 shadow-sm">
           <div className="card-body">
             <p className="text-muted text-uppercase small mb-1">Total spent</p>
-            <h3 className="h4 mb-0">{formatKES(stats.totalSpent)}</h3>
+            <h3 className="h4 mb-0">{formatCurrency(stats.totalSpent)}</h3>
           </div>
         </div>
         <div className="card flex-fill border-0 shadow-sm">
@@ -173,7 +172,7 @@ export default function Profile() {
                           <span className="text-muted small">No payment yet</span>
                         )}
                       </td>
-                      <td className="text-end fw-semibold">{formatKES(order.totalGross ?? 0)}</td>
+                      <td className="text-end fw-semibold">{formatCurrency(order.totalGross ?? 0)}</td>
                     </tr>
                   ))}
                 </tbody>

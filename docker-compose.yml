@@ -36,6 +36,9 @@ services:
       CACHE_STORE: redis
       REDIS_HOST: redis
       REDIS_PORT: 6379
+      SITENAME: ${SITENAME:-shop}
+      APP_VERSION: ${APP_VERSION:-dev}
+      BACKUP_DIR: ${BACKUP_DIR:-/opt/db_backups/shop}
     volumes:
       - backend-storage:/var/www/html/storage
       - backend-cache:/var/www/html/bootstrap/cache
@@ -57,8 +60,13 @@ services:
       POSTGRES_DB: ${DB_DATABASE:-supermarket}
       POSTGRES_USER: ${DB_USERNAME:-supermarket}
       POSTGRES_PASSWORD: ${DB_PASSWORD:-supermarket}
+      SITENAME: ${SITENAME:-shop}
+      APP_VERSION: ${APP_VERSION:-dev}
+      BACKUP_DIR: ${BACKUP_DIR:-/opt/db_backups/shop}
     volumes:
       - db-data:/var/lib/postgresql/data
+      - ${BACKUP_DIR:-/opt/db_backups/shop}:/opt/db_backups/shop
+      - ./docker/db/init:/docker-entrypoint-initdb.d:ro
     ports:
       - "5433:5432"
     healthcheck:

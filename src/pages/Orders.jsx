@@ -1,5 +1,5 @@
 import { useEffect, useState, useRef, useCallback } from 'react';
-import { Link } from 'react-router-dom';
+import { Link, useLocation, useNavigate } from 'react-router-dom';
 import { useAuth } from '../context/AuthContext.jsx';
 import { api } from '../services/api.js';
 import { useCurrencyFormatter } from '../context/SettingsContext.jsx';
@@ -10,13 +10,15 @@ const PAYMENT_TIMEOUT_MS = 3 * 60 * 1000;
 
 export default function Orders(){
   const formatCurrency = useCurrencyFormatter();
-  const formatKES = formatCurrency;
   const [orders, setOrders] = useState([]);
   const [meta, setMeta] = useState({ page:0, size:10, totalElements:0, totalPages:0, first:true, last:true });
   const [page, setPage] = useState(0);
   const [size, setSize] = useState(10);
   const { isAuthenticated } = useAuth();
+  const location = useLocation();
+  const navigate = useNavigate();
   const guestSessionIdRef = useRef(null);
+  const [highlightRef, setHighlightRef] = useState(() => location.state?.highlightOrder ?? null);
   const mapBackend = useCallback((list = []) => list.map(o => {
     const snapshot = (o && typeof o === 'object') ? o.snapshot : null;
     const rawItems = Array.isArray(o.items) && o.items.length > 0
@@ -58,6 +60,72 @@ export default function Orders(){
     const backendRef = o.orderNumber ?? o.order_number ?? o.reference ?? null;
     const guestRef = snapshot?.orderRef || snapshot?.id || (snapshot?.ts ? `guest-${snapshot.ts}` : `guest-${createdAtMs}`);
     const displayRef = backendRef ?? o.orderRef ?? (o.id != null ? `#${o.id}` : guestRef);
+
+    const backendDeliveryAddress = o.deliveryAddress ?? {};
+    const backendDeliveryContact = o.deliveryContact ?? {};
+    const backendDeliveryRecord = o.deliveryRecord ?? null;
+    const backendDeliveryShop = o.deliveryShop ?? backendDeliveryRecord?.shop ?? null;
+    const snapshotDelivery = snapshot?.delivery ?? {};
+
+    const resolvedDeliveryType = (o.deliveryType ?? snapshotDelivery.mode ?? snapshotDelivery.type ?? snapshotDelivery.method ?? null);
+    const normalizedDeliveryType = resolvedDeliveryType ? resolvedDeliveryType.toString().toUpperCase() : (snapshotDelivery.mode || snapshotDelivery.type ? String(snapshotDelivery.mode || snapshotDelivery.type).toUpperCase() : 'PICKUP');
+    const isDelivery = normalizedDeliveryType === 'DELIVERY';
+
+    const deliveryAddressLine1 = backendDeliveryAddress.line1
+      ?? backendDeliveryAddress.addressLine1
+      ?? snapshotDelivery.address
+      ?? snapshotDelivery.locationLabel
+      ?? snapshotDelivery.addressLine1
+      ?? '';
+    const deliveryAddressLine2 = backendDeliveryAddress.line2
+      ?? backendDeliveryAddress.addressLine2
+      ?? snapshotDelivery.context
+      ?? snapshotDelivery.addressLine2
+      ?? '';
+    const deliveryCity = backendDeliveryAddress.city ?? snapshotDelivery.city ?? '';
+    const deliveryRegion = backendDeliveryAddress.region ?? snapshotDelivery.region ?? '';
+    const deliveryPostal = backendDeliveryAddress.postalCode ?? snapshotDelivery.postalCode ?? '';
+    const deliveryLat = backendDeliveryAddress.lat ?? snapshotDelivery.latitude ?? snapshotDelivery.lat ?? null;
+    const deliveryLng = backendDeliveryAddress.lng ?? snapshotDelivery.longitude ?? snapshotDelivery.lng ?? null;
+    const deliveryInstructions = backendDeliveryContact.notes ?? snapshotDelivery.instructions ?? snapshotDelivery.deliveryInstructions ?? null;
+    const deliveryContactPhone = backendDeliveryContact.phone ?? snapshotDelivery.contactPhone ?? snapshotDelivery.deliveryContactPhone ?? o.customerPhone ?? '';
+    const deliveryContactEmail = backendDeliveryContact.email ?? snapshotDelivery.contactEmail ?? snapshotDelivery.deliveryContactEmail ?? '';
+    const deliveryDistanceKm = Number.isFinite(Number(o.deliveryDistanceKm)) ? Number(o.deliveryDistanceKm) : (Number.isFinite(Number(snapshotDelivery.distanceKm)) ? Number(snapshotDelivery.distanceKm) : null);
+    const deliveryCost = Number.isFinite(Number(o.deliveryCost)) ? Number(o.deliveryCost) : (Number.isFinite(Number(snapshotDelivery.fee)) ? Number(snapshotDelivery.fee) : null);
+    const deliveryStatus = o.deliveryStatus ?? backendDeliveryRecord?.status ?? snapshotDelivery.status ?? null;
+
+    const delivery = {
+      type: normalizedDeliveryType,
+      status: deliveryStatus,
+      requestedAt: o.deliveryRequestedAt ?? backendDeliveryRecord?.order?.deliveryRequestedAt ?? snapshotDelivery.requestedAt ?? null,
+      dispatchedAt: o.deliveryDispatchedAt ?? backendDeliveryRecord?.order?.deliveryDispatchedAt ?? snapshotDelivery.dispatchedAt ?? null,
+      completedAt: o.deliveryCompletedAt ?? backendDeliveryRecord?.order?.deliveryCompletedAt ?? snapshotDelivery.completedAt ?? null,
+      address: {
+        line1: deliveryAddressLine1,
+        line2: deliveryAddressLine2,
+        city: deliveryCity,
+        region: deliveryRegion,
+        postalCode: deliveryPostal,
+        lat: deliveryLat,
+        lng: deliveryLng
+      },
+      contact: {
+        phone: deliveryContactPhone,
+        email: deliveryContactEmail
+      },
+      instructions: deliveryInstructions,
+      distanceKm: deliveryDistanceKm,
+      cost: deliveryCost,
+      shop: backendDeliveryShop ? {
+        id: backendDeliveryShop.id,
+        name: backendDeliveryShop.name ?? backendDeliveryShop.displayName ?? backendDeliveryShop.label ?? null,
+        phone: backendDeliveryShop.phone ?? backendDeliveryShop.contactPhone ?? null,
+        addressLine: backendDeliveryShop.addressLine1 ?? backendDeliveryShop.address ?? backendDeliveryShop.locationLabel ?? null,
+        city: backendDeliveryShop.city ?? null
+      } : null,
+      record: backendDeliveryRecord ?? null
+    };
+
     return {
       id: o.id ?? backendRef ?? guestRef,
       orderId: o.id ?? null,
@@ -77,12 +145,19 @@ export default function Orders(){
         totalBeforeDiscount,
         couponCode
       },
+      delivery,
       customer: {
         ...(o.customer ?? {}),
         name: o.customer?.name ?? o.customerName ?? o.customer_name ?? 'Customer',
         phone: o.customer?.phone ?? o.customerPhone ?? o.customer_phone ?? '',
-        delivery: o.customer?.delivery ?? 'pickup',
-        address: o.customer?.address ?? ''
+        delivery: isDelivery ? 'delivery' : 'pickup',
+        address: deliveryAddressLine1,
+        addressLine2: deliveryAddressLine2,
+        city: deliveryCity,
+        region: deliveryRegion,
+        postalCode: deliveryPostal,
+        contactEmail: deliveryContactEmail,
+        contactPhone: deliveryContactPhone
       }
     };
   }), []);
@@ -184,6 +259,20 @@ export default function Orders(){
   function close(){ setSelected(null); }
   const totalItems = (o)=> o.snapshot.items.reduce((s,i)=>s+i.qty,0);
 
+  useEffect(() => {
+    if (location.state?.highlightOrder) {
+      setHighlightRef(location.state.highlightOrder);
+      const { highlightOrder, ...rest } = location.state;
+      navigate(location.pathname + location.search, { replace: true, state: Object.keys(rest).length ? rest : null });
+    }
+  }, [location, navigate]);
+
+  useEffect(() => {
+    if (selected?.orderRef && selected.orderRef === highlightRef) {
+      setHighlightRef(null);
+    }
+  }, [selected?.orderRef, highlightRef]);
+
   function statusBadge(order) {
     const stRaw = order?.paymentStatus ?? order?.paymentProgress?.status ?? order?.snapshot?.paymentStatus ?? null;
     const st = typeof stRaw === 'string' ? stRaw.toUpperCase() : null;
@@ -256,26 +345,31 @@ export default function Orders(){
             </tr>
           </thead>
           <tbody>
-            {orders.map(o => (
-              <tr key={o.orderRef} className={selected?.orderRef===o.orderRef? 'table-active':''}>
-                <td>
-                  <div className="fw-semibold">{o.orderRef}</div>
-                  {o.orderId != null && <div className="text-muted small">Order ID #{o.orderId}</div>}
-                </td>
-                <td>{new Date(o.createdAt).toLocaleString()}</td>
-                <td>{totalItems(o)}</td>
-                <td>
-                  <div className="d-flex flex-column">
-                    {statusBadge(o)}
-                    {paymentSubtext(o) && <span className="small text-muted mt-1">{paymentSubtext(o)}</span>}
-                  </div>
-                </td>
-                <td className="text-end">{formatKES(o.snapshot.total)}</td>
-                <td>
-                  <button className="btn btn-link p-0 small" onClick={()=>openOrder(o)} aria-label={`View details for order ${o.orderRef}`}>View</button>
-                </td>
-              </tr>
-            ))}
+            {orders.map(o => {
+              const rowClass = selected?.orderRef === o.orderRef
+                ? 'table-active'
+                : (highlightRef === o.orderRef ? 'table-success' : '');
+              return (
+                <tr key={o.orderRef} className={rowClass}>
+                  <td>
+                    <div className="fw-semibold">{o.orderRef}</div>
+                    {o.orderId != null && <div className="text-muted small">Order ID #{o.orderId}</div>}
+                  </td>
+                  <td>{new Date(o.createdAt).toLocaleString()}</td>
+                  <td>{totalItems(o)}</td>
+                  <td>
+                    <div className="d-flex flex-column">
+                      {statusBadge(o)}
+                      {paymentSubtext(o) && <span className="small text-muted mt-1">{paymentSubtext(o)}</span>}
+                    </div>
+                  </td>
+                  <td className="text-end">{formatCurrency(o.snapshot.total)}</td>
+                  <td>
+                    <button className="btn btn-link p-0 small" onClick={()=>openOrder(o)} aria-label={`View details for order ${o.orderRef}`}>View</button>
+                  </td>
+                </tr>
+              );
+            })}
           </tbody>
         </table>
         <div className="d-flex align-items-center justify-content-between flex-wrap gap-2">
@@ -300,7 +394,7 @@ export default function Orders(){
               <div className="modal-body">
                 {selected.orderId != null && <p className="small mb-1"><strong>Order ID:</strong> #{selected.orderId}</p>}
                 <p className="small mb-1"><strong>Date:</strong> {new Date(selected.createdAt).toLocaleString()}</p>
-                <p className="small mb-1"><strong>Total:</strong> {formatKES(selected.snapshot.total)}</p>
+                <p className="small mb-1"><strong>Total:</strong> {formatCurrency(selected.snapshot.total)}</p>
                 <p className="small mb-1"><strong>Payment Status:</strong> {statusBadge(selected)} {selected.paymentMethod && <span className="text-muted ms-2">{selected.paymentMethod}</span>}</p>
                 {selected.paymentProgress && (
                   <div className="border rounded small p-2 mb-2 bg-body-tertiary">
@@ -308,7 +402,7 @@ export default function Orders(){
                     <ul className="list-unstyled mb-1">
                       {selected.paymentProgress.provider && <li className="mb-0">Provider: <strong>{selected.paymentProgress.provider}</strong></li>}
                       {selected.paymentProgress.channel && <li className="mb-0">Channel: {selected.paymentProgress.channel}</li>}
-                      <li className="mb-0">Amount: {formatKES(selected.paymentProgress.amount ?? selected.snapshot.total)}</li>
+                      <li className="mb-0">Amount: {formatCurrency(selected.paymentProgress.amount ?? selected.snapshot.total)}</li>
                       {selected.paymentProgress.updatedAt && <li className="mb-0">Last update: {new Date(selected.paymentProgress.updatedAt).toLocaleString()}</li>}
                       {selected.paymentProgress.externalRequestId && <li className="mb-0 text-break">Request: {selected.paymentProgress.externalRequestId}</li>}
                       {selected.paymentProgress.externalTransactionId && <li className="mb-0 text-break">Txn: {selected.paymentProgress.externalTransactionId}</li>}
@@ -323,6 +417,33 @@ export default function Orders(){
                     )}
                   </div>
                 )}
+                {selected.delivery && (
+                  <div className="border rounded small p-2 mb-2">
+                    <p className="mb-1 fw-semibold">Delivery details</p>
+                    {selected.delivery.type === 'DELIVERY' ? (
+                      <ul className="list-unstyled mb-1">
+                        {selected.delivery.shop?.name && <li className="mb-0">Shop: {selected.delivery.shop.name}</li>}
+                        {selected.delivery.address?.line1 && (
+                          <li className="mb-0">Address: {selected.delivery.address.line1}{selected.delivery.address.line2 ? `, ${selected.delivery.address.line2}` : ''}</li>
+                        )}
+                        {(selected.delivery.address?.city || selected.delivery.address?.region) && (
+                          <li className="mb-0">Town: {[selected.delivery.address.city, selected.delivery.address.region].filter(Boolean).join(', ')}</li>
+                        )}
+                        {selected.delivery.contact?.phone && <li className="mb-0">Contact phone: {selected.delivery.contact.phone}</li>}
+                        {selected.delivery.contact?.email && <li className="mb-0">Contact email: {selected.delivery.contact.email}</li>}
+                        {Number.isFinite(selected.delivery.distanceKm) && <li className="mb-0">Distance: {selected.delivery.distanceKm.toFixed(1)} km</li>}
+                        {Number.isFinite(selected.delivery.cost) && <li className="mb-0">Delivery fee: {formatCurrency(selected.delivery.cost)}</li>}
+                        {(Number.isFinite(selected.delivery.address?.lat) || Number.isFinite(selected.delivery.address?.lng)) && (
+                          <li className="mb-0">Coordinates: {Number.isFinite(selected.delivery.address?.lat) ? selected.delivery.address.lat.toFixed(5) : '—'}, {Number.isFinite(selected.delivery.address?.lng) ? selected.delivery.address.lng.toFixed(5) : '—'}</li>
+                        )}
+                        {selected.delivery.instructions && <li className="mb-0">Instructions: {selected.delivery.instructions}</li>}
+                        {selected.delivery.status && <li className="mb-0">Delivery status: {selected.delivery.status}</li>}
+                      </ul>
+                    ) : (
+                      <p className="mb-0">Pickup order. Collect from store when ready.</p>
+                    )}
+                  </div>
+                )}
                 <div className="table-responsive mb-2">
                   <table className="table table-sm mb-0">
                     <thead>
@@ -333,14 +454,14 @@ export default function Orders(){
                         <tr key={i.id}>
                           <td>{i.name}</td>
                           <td className="text-center">{i.qty}</td>
-                          <td className="text-end">{formatKES(i.price * i.qty)}</td>
+                          <td className="text-end">{formatCurrency(i.price * i.qty)}</td>
                         </tr>
                       ))}
                     </tbody>
                     <tfoot>
-                      <tr><th colSpan={2} className="text-end">Subtotal</th><th className="text-end">{formatKES(selected.snapshot.subtotal ?? selected.snapshot.total)}</th></tr>
-                      <tr><th colSpan={2} className="text-end">VAT 16%</th><th className="text-end">{formatKES(selected.snapshot.vat ?? 0)}</th></tr>
-                      <tr><th colSpan={2} className="text-end">Total</th><th className="text-end">{formatKES(selected.snapshot.total)}</th></tr>
+                      <tr><th colSpan={2} className="text-end">Subtotal</th><th className="text-end">{formatCurrency(selected.snapshot.subtotal ?? selected.snapshot.total)}</th></tr>
+                      <tr><th colSpan={2} className="text-end">VAT 16%</th><th className="text-end">{formatCurrency(selected.snapshot.vat ?? 0)}</th></tr>
+                      <tr><th colSpan={2} className="text-end">Total</th><th className="text-end">{formatCurrency(selected.snapshot.total)}</th></tr>
                     </tfoot>
                   </table>
                 </div>
@@ -348,7 +469,19 @@ export default function Orders(){
                   <div className="small">
                     <p className="mb-1"><strong>Customer:</strong> {selected.customer.name}</p>
                     <p className="mb-1"><strong>Phone:</strong> {selected.customer.phone}</p>
-                    {selected.customer.delivery==='delivery' && <p className="mb-1"><strong>Address:</strong> {selected.customer.address}</p>}
+                    {selected.customer.delivery === 'delivery' && (
+                      <>
+                        {selected.customer.address && <p className="mb-1"><strong>Address:</strong> {selected.customer.address}</p>}
+                        {selected.customer.addressLine2 && <p className="mb-1"><strong>Directions:</strong> {selected.customer.addressLine2}</p>}
+                        {(selected.customer.city || selected.customer.region) && (
+                          <p className="mb-1"><strong>Town:</strong> {[selected.customer.city, selected.customer.region].filter(Boolean).join(', ')}</p>
+                        )}
+                        {selected.customer.contactEmail && <p className="mb-1"><strong>Email:</strong> {selected.customer.contactEmail}</p>}
+                        {selected.customer.contactPhone && selected.customer.contactPhone !== selected.customer.phone && (
+                          <p className="mb-1"><strong>Alternate phone:</strong> {selected.customer.contactPhone}</p>
+                        )}
+                      </>
+                    )}
                   </div>
                 )}
                 {/* Raw payment details removed; embedded summary fields displayed */}

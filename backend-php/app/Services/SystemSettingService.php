@@ -16,6 +16,18 @@ class SystemSettingService
         'currency.locale' => 'en-KE',
         'theme.default' => 'light',
         'store.name' => 'Supermarket',
+        'delivery.base_fee' => 150,
+        'delivery.per_km_fee' => 35,
+        'delivery.free_above' => 5000,
+        'delivery.min_fee' => 120,
+        'delivery.rounding.step' => 10,
+        'delivery.default_radius_km' => 15,
+        'delivery.max_fee_ratio' => 0.6,
+        'delivery.max_fee_absolute' => 800,
+        'delivery.low_order_subsidy_threshold' => 2000,
+        'delivery.low_order_subsidy_factor' => 0.65,
+        'delivery.cap_to_cart_total' => true,
+        'delivery.autocomplete.provider' => 'photon',
     ];
 
     public function all(): array

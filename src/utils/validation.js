@@ -8,6 +8,7 @@ export const messages = {
   requiredName: 'Name required',
   requiredPhone: 'Phone required',
   invalidPhone: 'Invalid Kenyan phone',
+  invalidEmail: 'Invalid email address',
   requiredAddress: 'Address required for delivery'
 };
 
@@ -23,3 +24,18 @@ export const phoneRules = {
 };
 
 export const addressRules = (isDelivery) => isDelivery ? { required: messages.requiredAddress } : {};
+
+export const optionalPhoneRules = {
+  validate: (value) => {
+    if (!value || String(value).trim() === '') return true;
+    return KENYAN_PHONE_REGEX.test(String(value).trim()) || messages.invalidPhone;
+  }
+};
+
+export const optionalEmailRules = {
+  validate: (value) => {
+    if (!value || String(value).trim() === '') return true;
+    const emailPattern = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+    return emailPattern.test(String(value).trim()) || messages.invalidEmail;
+  }
+};

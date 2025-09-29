@@ -18,7 +18,7 @@ class OrderAdminController extends Controller
         $allowed = ['created_at','total_gross','status','id'];
         if (!in_array($sort, $allowed, true)) { $sort = 'created_at'; }
 
-        $query = Order::query()->with('items.product');
+    $query = Order::query()->with(['items.product', 'deliveryShop', 'delivery']);
 
         if ($status = $request->get('status')) {
             $query->where('status', $status);

@@ -29,4 +29,9 @@ done
 echo "[backend-entrypoint] Running database seeders..."
 php artisan db:seed --force
 
+if [[ "${ENABLE_SCHEDULER:-1}" != "0" ]]; then
+  echo "[backend-entrypoint] Starting scheduler worker..."
+  php artisan schedule:work --no-interaction --verbose &
+fi
+
 exec "$@"

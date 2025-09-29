@@ -97,6 +97,9 @@ Common optimization-friendly commands:
 - `MIGRATION_ATTEMPTS` and `MIGRATION_RETRY_DELAY` control how many times (default 10) and how often (default 5s) the backend container retries `php artisan migrate --force` on startup if the database is not ready yet.
 - If `APP_KEY` is not supplied via environment variable, the backend container will generate one automatically on first boot.
 - Set `APP_KEY` in your shell before `docker compose up` to rotate the Laravel encryption key without editing tracked files.
+- `SITENAME` and `APP_VERSION` identify versioned PostgreSQL backups (files named `{sitename}-{version}.pgsql`). When the database volume is empty, the Postgres container restores the backup matching `APP_VERSION` (or the most recent file for `SITENAME` if a direct match is not found).
+- `BACKUP_DIR` overrides the host directory that stores and shares database backups with the container stack (defaults to `/opt/db_backups/shop`). Ensure the path exists and is writable.
+- `ENABLE_SCHEDULER` toggles the Laravel scheduler worker that runs background tasks such as expiring stale payments (defaults to `1`).
 
 ### Traefik dashboard access (optional helper)
 - Default credential: `admin` / `change-me`
@@ -108,6 +111,15 @@ Common optimization-friendly commands:
 2. Add a product to the cart and continue to checkout to confirm API calls reach <http://localhost:8080/api> (nginx proxies to the backend).
 3. (Optional) Navigate to <http://localhost/traefik>, authenticate with the default credential, and confirm any custom routers you configure for domain mappings.
 4. (Optional) When you map real domains, update Traefik (or your proxy) to route the hostnames to ports 8080 and 8081 respectively, then re-run the smoke test.
+
+### Database backup workflow
+- Export a versioned snapshot using the helper script (example):
+   ```bash
+   SITENAME=kensuper APP_VERSION=2025.09.29 ./scripts/db-backup.sh
+   ```
+   The script shells into the running `db` container, writes `/opt/db_backups/shop/{sitename}-{app_version}.pgsql`, and locks the file to mode `600`.
+- On container start, if the PostgreSQL volume is empty, the restore hook inside `docker/db/init/00-restore-backup.sh` imports the backup named `{SITENAME}-{APP_VERSION}.pgsql`. If it cannot find that exact version it falls back to the most recent backup for the same `SITENAME`.
+- Adjust `BACKUP_DIR` if you prefer a different host path. The directory must exist (create it with `mkdir -p /opt/db_backups/shop && chmod 700 /opt/db_backups/shop`).
 
 ## ✅ Verification checklist
 - `npm run build` (front-end) – confirms route-based chunking and pdfmake code splitting

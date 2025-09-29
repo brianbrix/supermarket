@@ -10,7 +10,7 @@ class ProductSeeder extends Seeder
 {
     public function run(): void
     {
-        $category = Category::firstOrCreate(['name' => 'General']);
-        Product::factory()->count(10)->create(['category_id' => $category->id]);
+        $category = Category::firstOrCreate(['name' => 'Electronics'], ['description' => 'Electronic gadgets and devices']);
+        Product::factory()->count(2)->create(['category_id' => $category->id]);
     }
 }

@@ -15,6 +15,8 @@ export default function AdminLayout() {
           <AdminNavLink to="/admin/coupons" icon="bi-ticket-perforated" label="Coupons" collapsed={collapsed} />
           <AdminNavLink to="/admin/categories" icon="bi-tags" label="Categories" collapsed={collapsed} />
           <AdminNavLink to="/admin/orders" icon="bi-receipt-cutoff" label="Orders" collapsed={collapsed} />
+          <AdminNavLink to="/admin/deliveries" icon="bi-truck" label="Deliveries" collapsed={collapsed} />
+          <AdminNavLink to="/admin/delivery-shops" icon="bi-geo-alt" label="Delivery Shops" collapsed={collapsed} />
           <AdminNavLink to="/admin/users" icon="bi-people" label="Users" collapsed={collapsed} />
           <AdminNavLink to="/admin/payments" icon="bi-cash-stack" label="Payments" collapsed={collapsed} />
           <AdminNavLink to="/admin/payment-options" icon="bi-sliders" label="Payment Options" collapsed={collapsed} />
