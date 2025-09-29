@@ -5,7 +5,7 @@ import FilterBar from '../../components/FilterBar.jsx';
 import PaginationBar from '../../components/PaginationBar.jsx';
 import Select from 'react-select';
 
-const makeEmptyForm = () => ({ name: '', brand: '', categoryId: '', price: '', description: '', stock: '0', unit: '', tagSlugs: [] });
+const makeEmptyForm = () => ({ name: '', brandId: '', brandName: '', categoryId: '', price: '', description: '', stock: '0', unit: '', tagSlugs: [] });
 
 export default function AdminProducts() {
   const [products, setProducts] = useState([]);
@@ -27,8 +27,21 @@ export default function AdminProducts() {
   const didInitialLoadRef = useRef(false); // guard StrictMode double invoke
   const categoriesLoadedRef = useRef(false); // ensure categories list fetched only once
   const [categories, setCategories] = useState([]);
+  const brandsLoadedRef = useRef(false);
+  const [brands, setBrands] = useState([]);
+  const [brandsLoading, setBrandsLoading] = useState(false);
   const tagsLoadedRef = useRef(false); // ensure tags fetched only once
   const [tags, setTags] = useState([]);
+  const brandOptionsMemo = useMemo(() => {
+    return [...brands]
+      .map(brand => ({
+        value: String(brand.id),
+        label: brand.name ?? brand.slug ?? `Brand ${brand.id}`,
+        description: brand.description ?? '',
+        active: brand.active !== false
+      }))
+      .sort((a, b) => a.label.localeCompare(b.label));
+  }, [brands]);
   const [submitting, setSubmitting] = useState(false);
   const [editingId, setEditingId] = useState(null);
   const tagOptionsMemo = useMemo(() => {
@@ -41,6 +54,16 @@ export default function AdminProducts() {
       .sort((a, b) => a.label.localeCompare(b.label));
   }, [tags]);
   const selectedTagOptions = useMemo(() => {
+  const selectedBrandOption = useMemo(() => {
+    if (form.brandId) {
+      return brandOptionsMemo.find(option => option.value === form.brandId)
+        ?? (form.brandName ? { value: form.brandId, label: form.brandName } : null);
+    }
+    if (form.brandName) {
+      return { value: '__custom__', label: form.brandName };
+    }
+    return null;
+  }, [form.brandId, form.brandName, brandOptionsMemo]);
     if (!Array.isArray(form.tagSlugs)) return [];
     const slugs = form.tagSlugs.map(String);
     const known = tagOptionsMemo.filter(option => slugs.includes(option.value));
@@ -97,6 +120,22 @@ export default function AdminProducts() {
       .catch(e => setError(e.message));
   }, []);
   useEffect(() => {
+    if (brandsLoadedRef.current) return;
+    brandsLoadedRef.current = true;
+    setBrandsLoading(true);
+    api.admin.brands.list({ page: 0, size: 200 })
+      .then(res => {
+        const list = res?.content ?? res ?? [];
+        if (Array.isArray(list)) {
+          setBrands(list);
+        } else {
+          setBrands([]);
+        }
+      })
+      .catch(e => setError(prev => prev ?? e.message))
+      .finally(() => setBrandsLoading(false));
+  }, []);
+  useEffect(() => {
     if (tagsLoadedRef.current) return;
     tagsLoadedRef.current = true;
     api.admin.productTags.list({ page: 0, size: 200 })
@@ -128,6 +167,14 @@ export default function AdminProducts() {
     setForm(f => ({ ...f, [name]: value }));
   }
 
+  function handleBrandSelect(option) {
+    if (!option || option.value === '__custom__') {
+      setForm(f => ({ ...f, brandId: '', brandName: '' }));
+      return;
+    }
+    setForm(f => ({ ...f, brandId: option.value, brandName: option.label }));
+  }
+
   function handleCancel(){
     setEditingId(null);
     resetFormState();
@@ -139,7 +186,8 @@ export default function AdminProducts() {
     setMultiError(null);
     setForm({
       name: p.name || '',
-      brand: p.brand || '',
+      brandId: p.brandId != null ? String(p.brandId) : '',
+      brandName: p.brandName || p.brand || '',
       categoryId: p.categoryId != null ? String(p.categoryId) : '',
       price: p.price != null ? String(p.price) : '',
       description: p.description || '',
@@ -191,6 +239,8 @@ export default function AdminProducts() {
       const categoryId = form.categoryId ? Number(form.categoryId) : null;
       const priceValue = Number(form.price);
       const stockValue = form.stock === '' ? 0 : Number(form.stock);
+      const brandIdValue = form.brandId ? Number(form.brandId) : null;
+      const brandNameValue = form.brandName ? form.brandName.trim() : '';
       if (!trimmedName) {
         throw new Error('Product name is required.');
       }
@@ -202,7 +252,10 @@ export default function AdminProducts() {
       }
       const payload = {
         name: trimmedName,
-        brand: form.brand ? form.brand.trim() : null,
+        brandId: Number.isFinite(brandIdValue) ? brandIdValue : null,
+        brand_id: Number.isFinite(brandIdValue) ? brandIdValue : null,
+        brandName: brandNameValue || null,
+        brand: brandNameValue || null,
         category_id: categoryId,
         price: priceValue,
         description: form.description,
@@ -374,8 +427,25 @@ export default function AdminProducts() {
                   <input id="product-name" required name="name" value={form.name} onChange={handleChange} className="form-control" placeholder="Name" />
                 </div>
                 <div>
-                  <label htmlFor="product-brand" className="form-label">Brand</label>
-                  <input id="product-brand" name="brand" value={form.brand} onChange={handleChange} className="form-control" placeholder="Brand (optional)" />
+                  <label htmlFor="product-brand" className="form-label d-flex justify-content-between align-items-center">
+                    <span>Brand</span>
+                    <Link to="/admin/brands" className="small">Manage brands</Link>
+                  </label>
+                  <Select
+                    inputId="product-brand"
+                    classNamePrefix="brand-select"
+                    isClearable
+                    isSearchable
+                    isDisabled={brandsLoading && brandOptionsMemo.length === 0}
+                    isLoading={brandsLoading}
+                    menuPortalTarget={selectMenuPortalTarget}
+                    options={brandOptionsMemo}
+                    value={selectedBrandOption}
+                    onChange={handleBrandSelect}
+                    placeholder={brandOptionsMemo.length === 0 && !brandsLoading ? 'Create a brand first' : 'Select a brand…'}
+                    noOptionsMessage={({ inputValue }) => inputValue ? 'No matching brand' : 'Start typing to search brands.'}
+                  />
+                  <div className="form-text small">Link products to brands to power storefront filters.</div>
                 </div>
                 <div>
                   <label htmlFor="product-category" className="form-label">Category</label>

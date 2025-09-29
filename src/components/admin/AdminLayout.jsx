@@ -13,6 +13,7 @@ export default function AdminLayout() {
           <AdminNavLink to="/admin/dashboard" icon="bi-speedometer2" label="Dashboard" collapsed={collapsed} />
           <AdminNavLink to="/admin/homepage" icon="bi-columns-gap" label="Homepage" collapsed={collapsed} />
           <AdminNavLink to="/admin/products" icon="bi-box-seam" label="Products" collapsed={collapsed} />
+          <AdminNavLink to="/admin/brands" icon="bi-patch-check" label="Brands" collapsed={collapsed} />
           <AdminNavLink to="/admin/coupons" icon="bi-ticket-perforated" label="Coupons" collapsed={collapsed} />
           <AdminNavLink to="/admin/categories" icon="bi-tags" label="Categories" collapsed={collapsed} />
           <AdminNavLink to="/admin/product-tags" icon="bi-bookmark-star" label="Product Tags" collapsed={collapsed} />
