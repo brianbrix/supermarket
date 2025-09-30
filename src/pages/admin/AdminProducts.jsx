@@ -139,21 +139,40 @@ export default function AdminProducts() {
       .catch(e => setError(e.message));
   }, []);
   useEffect(() => {
-    if (brandsLoadedRef.current) return;
-    brandsLoadedRef.current = true;
+    const categoryId = form.categoryId ? String(form.categoryId) : '';
+    if (!categoryId) {
+      setBrands([]);
+      setBrandsLoading(false);
+      return;
+    }
+    const cacheKey = categoryId;
+    const cached = brandCacheRef.current.get(cacheKey);
+    if (cached) {
+      setBrands(cached);
+      setBrandsLoading(false);
+      return;
+    }
+    let cancelled = false;
     setBrandsLoading(true);
-    api.admin.brands.list({ page: 0, size: 200 })
+    api.admin.brands.list({ page: 0, size: 200, categoryId, active: 'true' })
       .then(res => {
-        const list = res?.content ?? res ?? [];
-        if (Array.isArray(list)) {
-          setBrands(list);
-        } else {
-          setBrands([]);
-        }
+        if (cancelled) return;
+        const list = Array.isArray(res?.content) ? res.content : (Array.isArray(res) ? res : []);
+        brandCacheRef.current.set(cacheKey, list);
+        setBrands(list);
       })
-      .catch(e => setError(prev => prev ?? e.message))
-      .finally(() => setBrandsLoading(false));
-  }, []);
+      .catch(e => {
+        if (cancelled) return;
+        setError(prev => prev ?? e.message);
+        setBrands([]);
+      })
+      .finally(() => {
+        if (!cancelled) setBrandsLoading(false);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [form.categoryId]);
   useEffect(() => {
     if (tagsLoadedRef.current) return;
     tagsLoadedRef.current = true;
@@ -183,6 +202,10 @@ export default function AdminProducts() {
 
   function handleChange(e){
     const { name, value } = e.target;
+    if (name === 'categoryId') {
+      setForm(f => ({ ...f, categoryId: value, brandId: '', brandName: '' }));
+      return;
+    }
     setForm(f => ({ ...f, [name]: value }));
   }
 
@@ -457,6 +480,13 @@ export default function AdminProducts() {
                   <input id="product-name" required name="name" value={form.name} onChange={handleChange} className="form-control" placeholder="Name" />
                 </div>
                 <div>
+                  <label htmlFor="product-category" className="form-label">Category</label>
+                  <select id="product-category" name="categoryId" value={form.categoryId} onChange={handleChange} className="form-select">
+                    <option value="">No Category</option>
+                    {categories.map(c => <option key={c.id} value={c.id}>{c.label ?? c.fullName ?? c.name}</option>)}
+                  </select>
+                </div>
+                <div>
                   <label htmlFor="product-brand" className="form-label d-flex justify-content-between align-items-center">
                     <span>Brand</span>
                     <Link to="/admin/brands" className="small">Manage brands</Link>
@@ -465,15 +495,14 @@ export default function AdminProducts() {
                     id="product-brand"
                     labelKey="label"
                     clearButton
-                    allowNew
                     highlightOnlyResult
-                    options={brandOptionsMemo}
+                    options={brandSelectOptions}
                     selected={brandSelected}
                     onChange={handleBrandSelect}
-                    placeholder={brandOptionsMemo.length === 0 && !brandsLoading ? 'Create a brand first' : 'Select a brand…'}
-                    emptyLabel={brandsLoading ? 'Loading brands…' : (brandOptionsMemo.length ? 'No matching brand' : 'Create a brand first')}
-                    isLoading={brandsLoading}
-                    disabled={brandsLoading && brandOptionsMemo.length === 0}
+                    placeholder={!form.categoryId ? 'Select a category first' : (brandsLoading ? 'Loading brands…' : (brandSelectOptions.length ? 'Select a brand…' : 'No brands for this category'))}
+                    emptyLabel={!form.categoryId ? 'Select a category first' : (brandsLoading ? 'Loading brands…' : (brandSelectOptions.length ? 'No matching brand' : 'No brands for this category'))}
+                    isLoading={!!form.categoryId && brandsLoading}
+                    disabled={!form.categoryId || (brandsLoading && brandSelectOptions.length === 0)}
                     renderMenuItemChildren={(option) => (
                       <div className="d-flex flex-column">
                         <span>{option.label}</span>
@@ -481,14 +510,7 @@ export default function AdminProducts() {
                       </div>
                     )}
                   />
-                  <div className="form-text small">Link products to brands to power storefront filters.</div>
-                </div>
-                <div>
-                  <label htmlFor="product-category" className="form-label">Category</label>
-                  <select id="product-category" name="categoryId" value={form.categoryId} onChange={handleChange} className="form-select">
-                    <option value="">No Category</option>
-                    {categories.map(c => <option key={c.id} value={c.id}>{c.label ?? c.fullName ?? c.name}</option>)}
-                  </select>
+                  <div className="form-text small">Brands are filtered by the selected category.</div>
                 </div>
                 <div>
                   <label htmlFor="product-tags" className="form-label d-flex justify-content-between align-items-center">

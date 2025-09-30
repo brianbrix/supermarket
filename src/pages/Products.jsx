@@ -1,4 +1,4 @@
-import { useState, useEffect, useRef, useCallback } from 'react';
+import { useState, useEffect, useRef, useCallback, useMemo } from 'react';
 import { useLocation, useNavigate } from 'react-router-dom';
 import { api, mapProductResponse } from '../services/api.js';
 import { BRAND_NAME } from '../config/brand.js';
@@ -6,6 +6,7 @@ import { useSettings } from '../context/SettingsContext.jsx';
 import ProductCard from '../components/ProductCard.jsx';
 import { useDebounce } from '../hooks/useDebounce.js';
 import PaginationBar from '../components/PaginationBar.jsx';
+import { Typeahead } from 'react-bootstrap-typeahead';
 
 const toSlug = (value) => {
   if (value == null) return '';
@@ -16,12 +17,47 @@ const toSlug = (value) => {
     .replace(/^-+|-+$/g, '');
 };
 
+const arraysEqual = (a, b) => {
+  if (a === b) return true;
+  if (!Array.isArray(a) || !Array.isArray(b)) return false;
+  if (a.length !== b.length) return false;
+  for (let i = 0; i < a.length; i += 1) {
+    if (a[i] !== b[i]) return false;
+  }
+  return true;
+};
+
+const normalizeIdList = (input) => {
+  const values = Array.isArray(input) ? input : [input];
+  const next = [];
+  const seen = new Set();
+  values.forEach(value => {
+    if (value == null) return;
+    if (Array.isArray(value)) {
+      value.forEach(inner => {
+        const str = inner == null ? '' : String(inner).trim();
+        if (!str || seen.has(str)) return;
+        seen.add(str);
+        next.push(str);
+      });
+      return;
+    }
+    const str = String(value).trim();
+    if (!str || seen.has(str)) return;
+    seen.add(str);
+    next.push(str);
+  });
+  return next;
+};
+
 const parseSectionFilters = (params) => {
   const sectionId = params.get('sectionId') || null;
   const collectionTitle = params.get('sectionTitle') || '';
   const query = params.get('q') || '';
   const brand = params.get('brand') || '';
   const brandIdParam = params.get('brandId');
+  const brandIdsParams = params.getAll('brandIds[]');
+  const brandIdsCSV = params.get('brandIds');
   const brandSlugParam = toSlug(params.get('brandSlug') || params.get('brand')) || null;
   const categoryIdParam = params.get('categoryId');
   const categorySlug = toSlug(params.get('category')) || null;
@@ -49,14 +85,37 @@ const parseSectionFilters = (params) => {
     return null;
   };
 
+  const normalizedBrandIds = (() => {
+    const rawList = [];
+    if (Array.isArray(brandIdsParams) && brandIdsParams.length > 0) {
+      rawList.push(...brandIdsParams);
+    }
+    if (brandIdsCSV) {
+      rawList.push(...String(brandIdsCSV).split(',').map(part => part.trim()).filter(Boolean));
+    }
+    if (brandIdParam) {
+      rawList.push(String(brandIdParam));
+    }
+    const seen = new Set();
+    const deduped = [];
+    rawList.forEach(value => {
+      const normalized = value == null ? '' : String(value).trim();
+      if (!normalized || seen.has(normalized)) return;
+      seen.add(normalized);
+      deduped.push(normalized);
+    });
+    return deduped;
+  })();
+
   return {
     sectionId,
     collectionTitle,
     state: {
       query,
       brand,
-  brandId: brandIdParam ? String(brandIdParam) : null,
-  brandSlug: brandSlugParam,
+      brandIds: normalizedBrandIds,
+      brandId: normalizedBrandIds.length === 1 ? normalizedBrandIds[0] : null,
+      brandSlug: brandSlugParam,
       categoryId: categoryIdParam ? String(categoryIdParam) : null,
       categorySlug,
       inStock: boolFromParam(inStockRaw) ?? false,
@@ -154,8 +213,8 @@ export default function Products() {
   const initialCategorySlugRef = useRef(null);
   const initialCategoryIdRef = useRef(null);
   const initialBrandSlugRef = useRef(null);
-  const initialBrandIdRef = useRef(null);
-  const initialBrandNameRef = useRef('');
+  const initialBrandIdsRef = useRef(null);
+  const initialBrandNamesRef = useRef(null);
   const initialBrandHydratedRef = useRef(false);
   const syncingFromUrlRef = useRef(false);
   if (initialCategorySlugRef.current === null) {
@@ -167,18 +226,29 @@ export default function Products() {
   if (initialBrandSlugRef.current === null) {
     initialBrandSlugRef.current = initialParsed.state.brandSlug ?? toSlug(initialParsed.state.brand);
   }
-  if (initialBrandIdRef.current === null) {
-    initialBrandIdRef.current = initialParsed.state.brandId ?? null;
+  if (initialBrandIdsRef.current === null) {
+    if (Array.isArray(initialParsed.state.brandIds) && initialParsed.state.brandIds.length > 0) {
+      initialBrandIdsRef.current = initialParsed.state.brandIds.map(id => String(id));
+    } else if (initialParsed.state.brandId) {
+      initialBrandIdsRef.current = [String(initialParsed.state.brandId)];
+    } else {
+      initialBrandIdsRef.current = [];
+    }
   }
-  if (initialBrandNameRef.current === '') {
-    initialBrandNameRef.current = initialParsed.state.brand || '';
+  if (initialBrandNamesRef.current === null) {
+    const brandName = initialParsed.state.brand;
+    if (typeof brandName === 'string' && brandName.trim() !== '') {
+      initialBrandNamesRef.current = brandName.split(',').map(part => part.trim()).filter(Boolean);
+    } else {
+      initialBrandNamesRef.current = [];
+    }
   }
   const { settings } = useSettings();
   const storeName = settings?.storeName || BRAND_NAME;
   const [sectionFilters, setSectionFilters] = useState(initialParsed);
   const [collectionTitle, setCollectionTitle] = useState(initialParsed.collectionTitle);
   const [query, setQuery] = useState(initialParsed.state.query || '');
-  const [brandId, setBrandId] = useState(initialParsed.state.brandId ?? 'all');
+  const [brandIds, setBrandIds] = useState(() => (initialBrandIdsRef.current ?? []));
   const [brandOptionsByCategory, setBrandOptionsByCategory] = useState({});
   const [brandOptions, setBrandOptions] = useState([]);
   const [brandLoading, setBrandLoading] = useState(false);
@@ -244,79 +314,107 @@ export default function Products() {
     navigate(`${locationPathRef.current}${qs ? `?${qs}` : ''}`, { replace: true });
   }, [navigate]);
 
-  const setBrandSelection = useCallback((value, { fromUrl = false, brandSnapshot, brandName, brandSlug } = {}) => {
-    const normalizedValue = value == null || value === '' ? 'all' : String(value);
+  const setBrandSelection = useCallback((value, { fromUrl = false, brandSnapshot, brandNames, brandSlugs } = {}) => {
+    const normalizedIds = normalizeIdList(value);
     const list = brandSnapshot ?? brandOptions;
-    const selectedOption = normalizedValue === 'all' ? null : list.find(option => String(option.id) === normalizedValue);
-    const fallbackName = brandName ?? initialBrandNameRef.current ?? '';
-    const resolvedName = normalizedValue === 'all' ? '' : (selectedOption?.name ?? fallbackName);
-    const resolvedSlug = normalizedValue === 'all' ? null : (selectedOption?.slug ?? brandSlug ?? (resolvedName ? toSlug(resolvedName) : null));
+    const matched = normalizedIds.map(id => list.find(option => String(option.id) === id) || null);
+    const matchedOptions = matched.filter(Boolean);
+    const matchedIds = matchedOptions.map(option => String(option.id));
+    const unmatchedIds = normalizedIds.filter(id => !matchedIds.includes(id));
+    const resolvedIds = [...matchedIds, ...unmatchedIds];
+    const resolvedNames = matchedOptions.map(option => option.name).filter(Boolean);
+    const fallbackNames = Array.isArray(brandNames) ? brandNames : initialBrandNamesRef.current || [];
+    if (resolvedNames.length === 0 && fallbackNames.length > 0) {
+      resolvedNames.push(...fallbackNames);
+    }
+    const resolvedSlugs = matchedOptions.map(option => option.slug ?? toSlug(option.name)).filter(Boolean);
+    if (!fromUrl && Array.isArray(brandSlugs) && brandSlugs.length > 0 && resolvedSlugs.length === 0) {
+      resolvedSlugs.push(...brandSlugs.filter(Boolean));
+    }
+
+    initialBrandIdsRef.current = [...resolvedIds];
+    initialBrandHydratedRef.current = true;
+    if (resolvedNames.length > 0) {
+      initialBrandNamesRef.current = [...resolvedNames];
+    }
+    if (resolvedSlugs.length > 0) {
+      initialBrandSlugRef.current = resolvedSlugs[0];
+    }
 
     setSectionFilters(prev => ({
       ...prev,
       state: {
         ...prev.state,
-        brand: resolvedName,
-        brandId: normalizedValue === 'all' ? null : normalizedValue,
-        brandSlug: normalizedValue === 'all' ? null : resolvedSlug
+        brand: resolvedNames.join(', '),
+        brandIds: resolvedIds,
+        brandId: resolvedIds.length === 1 ? resolvedIds[0] : null,
+        brandSlug: resolvedIds.length === 1 ? (resolvedSlugs[0] ?? null) : null
       }
     }));
 
-    initialBrandIdRef.current = normalizedValue === 'all' ? null : normalizedValue;
-    initialBrandNameRef.current = resolvedName;
-    initialBrandSlugRef.current = resolvedSlug;
-
     if (fromUrl) {
       syncingFromUrlRef.current = true;
-      setBrandId(normalizedValue);
+      if (!arraysEqual(brandIds, resolvedIds)) {
+        setBrandIds(resolvedIds);
+      }
       return;
     }
 
-    if (brandId !== normalizedValue) {
-      setBrandId(normalizedValue);
+    if (!arraysEqual(brandIds, resolvedIds)) {
+      setBrandIds([...resolvedIds]);
     }
 
     const params = new URLSearchParams(location.search);
-    if (normalizedValue === 'all') {
-      params.delete('brandId');
-      params.delete('brandSlug');
-      params.delete('brand');
-    } else if (selectedOption) {
-      params.set('brandId', normalizedValue);
-      const slug = toSlug(selectedOption.slug ?? selectedOption.name ?? resolvedName);
-      if (slug) params.set('brandSlug', slug);
-      if (selectedOption.name || resolvedName) {
-        params.set('brand', selectedOption.name ?? resolvedName);
-      }
+    params.delete('brandId');
+    params.delete('brandSlug');
+    params.delete('brand');
+    params.delete('brandIds');
+    params.delete('brandIds[]');
+
+    if (resolvedIds.length === 0) {
+      // no-op, all params cleared
+    } else if (resolvedIds.length === 1) {
+      const id = resolvedIds[0];
+      params.set('brandId', id);
+      if (resolvedSlugs[0]) params.set('brandSlug', resolvedSlugs[0]);
+      if (resolvedNames[0]) params.set('brand', resolvedNames[0]);
     } else {
-      params.set('brandId', normalizedValue);
-      if (resolvedSlug) params.set('brandSlug', resolvedSlug);
-      if (resolvedName) params.set('brand', resolvedName);
+      resolvedIds.forEach(id => params.append('brandIds[]', id));
+      if (resolvedNames.length) {
+        params.set('brand', resolvedNames.join(', '));
+      }
     }
 
     const qs = params.toString();
     navigate(`${location.pathname}${qs ? `?${qs}` : ''}`, { replace: true });
-  }, [brandOptions, brandId, location.pathname, location.search, navigate]);
+  }, [brandOptions, brandIds, location.pathname, location.search, navigate]);
 
   useEffect(() => {
     const parsed = parseSectionFilters(new URLSearchParams(location.search));
     setSectionFilters(parsed);
     setCollectionTitle(parsed.collectionTitle);
     setQuery(parsed.state.query || '');
-    if (parsed.state.brandId) {
-      const id = String(parsed.state.brandId);
-      initialBrandIdRef.current = id;
-      setBrandId(id);
-    } else {
-      initialBrandIdRef.current = null;
-      setBrandId('all');
+    const parsedBrandIds = Array.isArray(parsed.state.brandIds) ? parsed.state.brandIds.map(id => String(id)) : [];
+    const fallbackBrandId = parsed.state.brandId ? [String(parsed.state.brandId)] : [];
+    const idsFromUrl = parsedBrandIds.length > 0 ? parsedBrandIds : fallbackBrandId;
+    initialBrandIdsRef.current = [...idsFromUrl];
+    if (parsed.state.brand) {
+      const names = String(parsed.state.brand)
+        .split(',')
+        .map(part => part.trim())
+        .filter(Boolean);
+      if (names.length) {
+        initialBrandNamesRef.current = names;
+      }
     }
     if (parsed.state.brandSlug) {
       initialBrandSlugRef.current = parsed.state.brandSlug;
     }
-    if (parsed.state.brand) {
-      initialBrandNameRef.current = parsed.state.brand;
-    }
+    setBrandSelection(idsFromUrl, {
+      fromUrl: true,
+      brandNames: initialBrandNamesRef.current,
+      brandSlugs: initialBrandSlugRef.current ? [initialBrandSlugRef.current] : []
+    });
     setInStockOnly(parsed.state.inStock ?? false);
     setCategoryId(parsed.state.categoryId ?? 'all');
     if (parsed.state.minPrice != null || parsed.state.maxPrice != null) {
@@ -395,8 +493,16 @@ export default function Products() {
         if (initialParsed.state.query) {
           searchPayload.q = initialParsed.state.query;
         }
-        if (initialParsed.state.brandId) {
-          searchPayload.brandId = initialParsed.state.brandId;
+        if (Array.isArray(initialParsed.state.brandIds) && initialParsed.state.brandIds.length > 0) {
+          const normalizedIds = initialParsed.state.brandIds.map(id => String(id));
+          searchPayload.brandIds = normalizedIds;
+          if (normalizedIds.length === 1) {
+            searchPayload.brandId = normalizedIds[0];
+          }
+        } else if (initialParsed.state.brandId) {
+          const id = String(initialParsed.state.brandId);
+          searchPayload.brandId = id;
+          searchPayload.brandIds = [id];
         } else if (initialParsed.state.brandSlug) {
           searchPayload.brandSlug = initialParsed.state.brandSlug;
         } else if (initialParsed.state.brand) {
@@ -420,7 +526,8 @@ export default function Products() {
           (Array.isArray(staticFilters?.tags) && staticFilters.tags.length > 0) ||
           (Array.isArray(staticFilters?.ids) && staticFilters.ids.length > 0)
         );
-  const shouldSearch = hasStaticFilters || initialCategory !== 'all' || Boolean(initialParsed.state.query) || Boolean(initialParsed.state.brandId) || Boolean(initialParsed.state.brand) || initialParsed.state.inStock || initialParsed.state.minPrice != null || initialParsed.state.maxPrice != null;
+    const hasBrandFilters = (Array.isArray(initialParsed.state.brandIds) && initialParsed.state.brandIds.length > 0) || Boolean(initialParsed.state.brandId) || Boolean(initialParsed.state.brand);
+    const shouldSearch = hasStaticFilters || initialCategory !== 'all' || Boolean(initialParsed.state.query) || hasBrandFilters || initialParsed.state.inStock || initialParsed.state.minPrice != null || initialParsed.state.maxPrice != null;
         const [pageResp, range] = await Promise.all([
           shouldSearch ? api.products.search(searchPayload) : api.products.list(0, size),
           api.products.priceRange(initialCategory !== 'all' ? initialCategory : undefined)
@@ -443,8 +550,8 @@ export default function Products() {
           max: presetMax != null ? presetMax : max
         });
         initialSearchSkippedRef.current = true;
-  const initialBrandKey = initialBrandIdRef.current ? String(initialBrandIdRef.current) : '';
-  lastFiltersNoPageRef.current = JSON.stringify({ q: '', brandId: initialBrandKey, cat: initialCategory, min, max, stock: 0 });
+    const initialBrandKey = Array.isArray(initialBrandIdsRef.current) && initialBrandIdsRef.current.length > 0 ? initialBrandIdsRef.current.join('|') : '';
+    lastFiltersNoPageRef.current = JSON.stringify({ q: '', brandKey: initialBrandKey, cat: initialCategory, min, max, stock: 0 });
         lastSearchKeyRef.current = `${lastFiltersNoPageRef.current}|page=0`;
         setBaselineLoaded(true);
         setLoading(false);
@@ -459,7 +566,7 @@ export default function Products() {
   }, [size, initialParsed, setCategorySelection]);
 
   const debouncedQuery = useDebounce(query, 500);
-  const debouncedBrandId = useDebounce(brandId, 300);
+  const debouncedBrandIds = useDebounce(brandIds, 300);
   const debouncedRange = useDebounce(priceRange, 400);
   const debouncedInStock = useDebounce(inStockOnly, 300);
   const debouncedCategory = useDebounce(categoryId, 300);
@@ -493,11 +600,14 @@ export default function Products() {
     const effectiveMin = rangeUninitialized ? sliderBounds.min : debouncedRange.min;
     const effectiveMax = rangeUninitialized ? sliderBounds.max : debouncedRange.max;
 
-    const normalizedBrandId = debouncedBrandId && debouncedBrandId !== 'all' ? String(debouncedBrandId) : '';
+    const normalizedBrandIds = Array.isArray(debouncedBrandIds)
+      ? debouncedBrandIds.filter(id => id && id !== 'all').map(id => String(id))
+      : [];
+    const brandKey = normalizedBrandIds.join('|');
 
     const filtersNoPageKey = JSON.stringify({
       q: debouncedQuery || '',
-      brandId: normalizedBrandId,
+      brandKey,
       cat: debouncedCategory,
       min: effectiveMin,
       max: effectiveMax,
@@ -513,7 +623,7 @@ export default function Products() {
     if (filtersKey === lastSearchKeyRef.current) return;
 
     if (!initialSearchSkippedRef.current) {
-      const noFiltersApplied = !debouncedQuery && !normalizedBrandId && debouncedCategory === 'all' && !debouncedInStock && page === 0 &&
+      const noFiltersApplied = !debouncedQuery && normalizedBrandIds.length === 0 && debouncedCategory === 'all' && !debouncedInStock && page === 0 &&
         effectiveMin === sliderBounds.min && effectiveMax === sliderBounds.max;
       if (noFiltersApplied) {
         initialSearchSkippedRef.current = true;
@@ -535,7 +645,12 @@ export default function Products() {
     };
     applyStaticFiltersToPayload(payload, sectionFilters.staticFilters);
     if (debouncedQuery) payload.q = debouncedQuery;
-    if (normalizedBrandId) payload.brandId = normalizedBrandId;
+    if (normalizedBrandIds.length > 0) {
+      payload.brandIds = normalizedBrandIds;
+      if (normalizedBrandIds.length === 1) {
+        payload.brandId = normalizedBrandIds[0];
+      }
+    }
     if (debouncedCategory !== 'all') payload.categoryId = debouncedCategory;
     if (!rangeUninitialized && (effectiveMin !== sliderBounds.min || effectiveMax !== sliderBounds.max)) {
       payload.minPrice = effectiveMin;
@@ -558,27 +673,32 @@ export default function Products() {
         setLoading(false);
       });
     return () => { cancelled = true; };
-  }, [debouncedQuery, debouncedBrandId, debouncedCategory, debouncedRange.min, debouncedRange.max, debouncedInStock, page, baselineLoaded, size, sliderBounds.min, sliderBounds.max, sectionFilters.staticFilters]);
+  }, [debouncedQuery, debouncedBrandIds, debouncedCategory, debouncedRange.min, debouncedRange.max, debouncedInStock, page, baselineLoaded, size, sliderBounds.min, sliderBounds.max, sectionFilters.staticFilters]);
 
-  useEffect(() => { setPage(0); }, [debouncedQuery, debouncedBrandId, debouncedCategory, debouncedRange.min, debouncedRange.max, debouncedInStock]);
+  useEffect(() => { setPage(0); }, [debouncedQuery, debouncedBrandIds, debouncedCategory, debouncedRange.min, debouncedRange.max, debouncedInStock]);
 
   useEffect(() => {
     if (!syncingFromUrlRef.current) return;
     const selectedCategory = categories.find(cat => String(cat.id) === categoryId);
-    const selectedBrand = brandOptions.find(option => String(option.id) === brandId);
+    const brandLookup = new Map(brandOptions.map(option => [String(option.id), option]));
+    const selectedBrands = Array.isArray(brandIds) ? brandIds.map(id => brandLookup.get(String(id))).filter(Boolean) : [];
+    const brandNames = selectedBrands.map(option => option.name).filter(Boolean);
+    const brandSlugs = selectedBrands.map(option => option.slug ?? toSlug(option.name)).filter(Boolean);
+
     setSectionFilters(prev => ({
       ...prev,
       state: {
         ...prev.state,
         categoryId: categoryId === 'all' ? null : categoryId,
         categorySlug: selectedCategory?.slug ?? selectedCategory?.raw?.slug ?? (selectedCategory?.name ? toSlug(selectedCategory.name) : null),
-        brand: brandId === 'all' ? '' : (selectedBrand?.name ?? initialBrandNameRef.current ?? ''),
-        brandId: brandId === 'all' ? null : brandId,
-        brandSlug: brandId === 'all' ? null : (selectedBrand?.slug ?? toSlug(selectedBrand?.name ?? initialBrandNameRef.current ?? ''))
+        brand: brandNames.join(', '),
+        brandIds: Array.isArray(brandIds) ? [...brandIds] : [],
+        brandId: selectedBrands.length === 1 ? String(selectedBrands[0].id) : null,
+        brandSlug: selectedBrands.length === 1 ? (brandSlugs[0] ?? null) : null
       }
     }));
     syncingFromUrlRef.current = false;
-  }, [categoryId, brandId, categories, brandOptions]);
+  }, [categoryId, brandIds, categories, brandOptions]);
 
   useEffect(() => {
     if (!categories.length) return;
@@ -604,21 +724,23 @@ export default function Products() {
   useEffect(() => {
     if (brandLoading || !Array.isArray(brandOptions)) return;
 
+    const availableIds = new Set(brandOptions.map(option => String(option.id)));
+
     if (brandOptions.length === 0) {
-      if (brandId !== 'all') {
-        setBrandSelection('all', { brandSnapshot: [] });
+      if (Array.isArray(brandIds) && brandIds.length > 0) {
+        setBrandSelection([], { brandSnapshot: [] });
       }
       return;
     }
 
-    if (brandId !== 'all') {
-      const match = brandOptions.find(option => String(option.id) === String(brandId));
-      if (!match) {
-        setBrandSelection('all', { brandSnapshot: brandOptions });
-      } else {
-        initialBrandIdRef.current = match.id;
-        initialBrandNameRef.current = match.name;
-        initialBrandSlugRef.current = match.slug ?? toSlug(match.name);
+    if (Array.isArray(brandIds) && brandIds.length > 0) {
+      const filtered = brandIds.filter(id => availableIds.has(String(id)));
+      if (!arraysEqual(filtered, brandIds)) {
+        setBrandSelection(filtered, { brandSnapshot: brandOptions });
+        return;
+      }
+      if (!initialBrandHydratedRef.current) {
+        setBrandSelection([...brandIds], { fromUrl: true, brandSnapshot: brandOptions });
         initialBrandHydratedRef.current = true;
       }
       return;
@@ -626,15 +748,10 @@ export default function Products() {
 
     if (initialBrandHydratedRef.current) return;
 
-    if (initialBrandIdRef.current) {
-      const byId = brandOptions.find(option => String(option.id) === String(initialBrandIdRef.current));
-      if (byId) {
-        setBrandSelection(String(byId.id), {
-          fromUrl: true,
-          brandSnapshot: brandOptions,
-          brandName: byId.name,
-          brandSlug: byId.slug ?? toSlug(byId.name)
-        });
+    if (Array.isArray(initialBrandIdsRef.current) && initialBrandIdsRef.current.length > 0) {
+      const matches = initialBrandIdsRef.current.filter(id => availableIds.has(String(id)));
+      if (matches.length > 0) {
+        setBrandSelection(matches, { fromUrl: true, brandSnapshot: brandOptions });
         initialBrandHydratedRef.current = true;
         return;
       }
@@ -643,16 +760,29 @@ export default function Products() {
     if (initialBrandSlugRef.current) {
       const bySlug = brandOptions.find(option => toSlug(option.slug ?? option.name) === initialBrandSlugRef.current);
       if (bySlug) {
-        setBrandSelection(String(bySlug.id), {
+        setBrandSelection([String(bySlug.id)], {
           fromUrl: true,
-          brandSnapshot: brandOptions,
-          brandName: bySlug.name,
-          brandSlug: bySlug.slug ?? toSlug(bySlug.name)
+          brandSnapshot: brandOptions
         });
+        initialBrandHydratedRef.current = true;
+        return;
       }
     }
+
+    if (Array.isArray(initialBrandNamesRef.current) && initialBrandNamesRef.current.length > 0) {
+      const nameMatches = brandOptions.filter(option => initialBrandNamesRef.current.some(name => option.name?.toLowerCase() === name.toLowerCase()));
+      if (nameMatches.length > 0) {
+        setBrandSelection(nameMatches.map(option => String(option.id)), {
+          fromUrl: true,
+          brandSnapshot: brandOptions
+        });
+        initialBrandHydratedRef.current = true;
+        return;
+      }
+    }
+
     initialBrandHydratedRef.current = true;
-  }, [brandOptions, brandId, brandLoading, setBrandSelection]);
+  }, [brandOptions, brandIds, brandLoading, setBrandSelection]);
 
   useEffect(() => {
     if (Array.isArray(brandOptionsByCategory[ALL_CATEGORY_KEY]) || fetchingBrandKeysRef.current.has(ALL_CATEGORY_KEY)) {
@@ -739,14 +869,10 @@ export default function Products() {
     setCategorySelection(event.target.value);
   }
 
-  function handleBrandSelect(event) {
-    setBrandSelection(event.target.value);
-  }
-
   function resetFilters() {
     setQuery('');
     setCategorySelection('all');
-    setBrandSelection('all');
+    setBrandSelection([]);
     setInStockOnly(false);
     setPriceRange({ ...sliderBounds });
     setCollectionTitle('');
@@ -757,6 +883,7 @@ export default function Products() {
         query: '',
         brand: '',
         brandId: null,
+  brandIds: [],
         brandSlug: null,
         categoryId: null,
         categorySlug: null,
@@ -771,7 +898,7 @@ export default function Products() {
 
   const activeFilterCount = (
     (query ? 1 : 0) +
-    (brandId !== 'all' ? 1 : 0) +
+    (Array.isArray(brandIds) && brandIds.length > 0 ? 1 : 0) +
     (categoryId !== 'all' ? 1 : 0) +
     (inStockOnly ? 1 : 0) +
     (priceRange.min !== sliderBounds.min ? 1 : 0) +
@@ -779,6 +906,25 @@ export default function Products() {
   );
   const [showFilters, setShowFilters] = useState(true);
   useEffect(()=> { if (window.innerWidth < 576) setShowFilters(false); }, []);
+
+  const selectedBrandOptions = useMemo(() => {
+    if (!Array.isArray(brandIds) || brandIds.length === 0) return [];
+    const optionMap = new Map(brandOptions.map(option => [String(option.id), option]));
+    return brandIds.map(id => optionMap.get(String(id))).filter(Boolean);
+  }, [brandIds, brandOptions]);
+
+  const brandSelectDisabled = brandLoading || (categoryId !== 'all' && !brandLoading && brandOptions.length === 0);
+  const brandPlaceholder = categoryId === 'all'
+    ? 'Filter by brand (optional)'
+    : brandOptions.length > 0
+      ? 'Brands for selected category'
+      : 'No brands available yet';
+  const brandHelperMessage = (() => {
+    if (brandLoading) return 'Loading brands…';
+    if (categoryId !== 'all' && brandOptions.length === 0) return 'No brands linked to this category yet.';
+    if (categoryId === 'all' && brandOptions.length === 0) return 'No brands available yet.';
+    return '';
+  })();
 
   return (
     <section className="container-fluid py-3 px-3 px-sm-4">
@@ -808,24 +954,33 @@ export default function Products() {
           <label className="form-label small text-muted" htmlFor="filterSearch">Search</label>
           <input id="filterSearch" type="search" className="form-control" placeholder="e.g. unga" value={query} onChange={e=>setQuery(e.target.value)} />
         </div>
-        <div className="col-6 col-md-3 col-lg-2">
-          <label className="form-label small text-muted" htmlFor="filterBrand">Brand</label>
-          <select
+        <div className="col-12 col-md-6 col-lg-3">
+          <label className="form-label small text-muted" htmlFor="filterBrand">Brands</label>
+          <Typeahead
             id="filterBrand"
-            className="form-select form-select-sm"
-            value={brandId}
-            onChange={handleBrandSelect}
-            disabled={brandLoading || (categoryId !== 'all' && !brandLoading && brandOptions.length === 0)}
-          >
-            <option value="all">All brands</option>
-            {brandOptions.map(option => (
-              <option key={option.id} value={option.id}>{option.name}</option>
-            ))}
-          </select>
-          {brandLoading && <small className="form-text text-muted">Loading brands…</small>}
-          {!brandLoading && categoryId !== 'all' && brandOptions.length === 0 && (
-            <small className="form-text text-muted">No brands linked to this category yet.</small>
-          )}
+            multiple
+            labelKey="name"
+            options={brandOptions}
+            selected={selectedBrandOptions}
+            onChange={(selected) => {
+              const ids = selected.map(option => String(option.id));
+              const names = selected.map(option => option.name).filter(Boolean);
+              const slugs = selected.map(option => option.slug ?? toSlug(option.name)).filter(Boolean);
+              setBrandSelection(ids, { brandSnapshot: brandOptions, brandNames: names, brandSlugs: slugs });
+            }}
+            placeholder={brandPlaceholder}
+            disabled={brandSelectDisabled}
+            isLoading={brandLoading}
+            clearButton
+            renderMenuItemChildren={(option) => (
+              <div className="d-flex flex-column">
+                <span>{option.name}</span>
+                {option.slug && <small className="text-muted">{option.slug}</small>}
+              </div>
+            )}
+            menuProps={{ 'aria-label': 'Brand options' }}
+          />
+          {brandHelperMessage && <small className="form-text text-muted">{brandHelperMessage}</small>}
         </div>
         <div className="col-6 col-md-3 col-lg-2">
           <label className="form-label small text-muted" htmlFor="filterCategory">Category</label>
