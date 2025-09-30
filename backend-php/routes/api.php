@@ -136,6 +136,7 @@ Route::middleware(['auth:sanctum','role:ADMIN'])->prefix('admin')->group(functio
     Route::delete('/payments/options/{paymentOption}', [PaymentOptionAdminController::class, 'destroy']);
     Route::get('/system-settings', [AdminSystemSettingController::class, 'index']);
     Route::post('/system-settings', [AdminSystemSettingController::class, 'upsert']);
+    Route::post('/system-settings/cache/refresh', [AdminSystemSettingController::class, 'refreshCache']);
     // Category mutations (restricted)
     // Read endpoints for admin UI (paged + search)
     Route::get('/categories', [CategoryAdminController::class, 'index']);

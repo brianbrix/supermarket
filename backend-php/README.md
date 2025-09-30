@@ -64,3 +64,23 @@ If you discover a security vulnerability within Laravel, please send an e-mail t
 ## License
 
 The Laravel framework is open-sourced software licensed under the [MIT license](https://opensource.org/licenses/MIT).
+
+## Redis caching
+
+This application now relies on Redis to accelerate several high-traffic endpoints:
+
+- Admin analytics overview and dashboard metrics
+- Public homepage layout lookups
+- Global system settings hydration
+
+To opt into Redis in local development, install or start a Redis server (for example via Homebrew or Docker) and set one of the following variables in your `.env` file:
+
+```
+CACHE_STORE=redis
+# or
+CACHE_DRIVER=redis
+```
+
+The included Docker Compose stack already provisions a Redis container and sets `CACHE_STORE=redis` automatically for the PHP backend service.
+
+Cache entries are short-lived (between 60 seconds and 5 minutes) and are automatically invalidated when related records change.

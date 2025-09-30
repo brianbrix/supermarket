@@ -3,6 +3,20 @@ set -euo pipefail
 
 cd /var/www/html
 
+if [[ ! -f .env ]]; then
+  if [[ ! -w . ]]; then
+    echo "[backend-entrypoint] Warning: application directory not writable; unable to seed .env automatically." >&2
+  elif [[ -f .env.docker ]]; then
+    echo "[backend-entrypoint] Initialising .env from .env.docker..."
+    cp .env.docker .env
+  elif [[ -f .env.example ]]; then
+    echo "[backend-entrypoint] Initialising .env from .env.example..."
+    cp .env.example .env
+  else
+    echo "[backend-entrypoint] Warning: no .env template found; proceeding without copy." >&2
+  fi
+fi
+
 if [[ -z "${APP_KEY:-}" || "${APP_KEY}" == "base64:placeholder" ]]; then
   echo "[backend-entrypoint] Generating APP_KEY..."
   export APP_KEY="$(php artisan key:generate --show | tr -d '\r')"

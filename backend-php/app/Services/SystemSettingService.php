@@ -3,6 +3,7 @@
 namespace App\Services;
 
 use App\Models\SystemSetting;
+use Illuminate\Support\Facades\Cache;
 
 class SystemSettingService
 {
@@ -30,24 +31,28 @@ class SystemSettingService
         'delivery.autocomplete.provider' => 'photon',
     ];
 
+    private const CACHE_KEY_ALL = 'system-settings:all';
+
     public function all(): array
     {
-        $settings = SystemSetting::query()->get()->keyBy('key');
+        return Cache::rememberForever(self::CACHE_KEY_ALL, function () {
+            $settings = SystemSetting::query()->get()->keyBy('key');
 
-        $resolved = [];
-        foreach ($this->defaults as $key => $default) {
-            $resolved[$key] = $settings->has($key)
-                ? $settings[$key]->resolved_value
-                : $default;
-        }
-
-        foreach ($settings as $key => $setting) {
-            if (!array_key_exists($key, $resolved)) {
-                $resolved[$key] = $setting->resolved_value;
+            $resolved = [];
+            foreach ($this->defaults as $key => $default) {
+                $resolved[$key] = $settings->has($key)
+                    ? $settings[$key]->resolved_value
+                    : $default;
             }
-        }
 
-        return $resolved;
+            foreach ($settings as $key => $setting) {
+                if (!array_key_exists($key, $resolved)) {
+                    $resolved[$key] = $setting->resolved_value;
+                }
+            }
+
+            return $resolved;
+        });
     }
 
     public function listWithMeta(): array
@@ -78,7 +83,14 @@ class SystemSettingService
             );
         }
 
+        $this->flushCache();
+
         return $this->listWithMeta();
+    }
+
+    public function flushCache(): void
+    {
+        Cache::forget(self::CACHE_KEY_ALL);
     }
 
     private function normalizeType(?string $type, mixed $value): string

@@ -5,6 +5,7 @@ namespace App\Http\Controllers\Admin;
 use App\Http\Controllers\Controller;
 use App\Services\SystemSettingService;
 use Illuminate\Http\Request;
+use Illuminate\Support\Facades\Cache;
 
 class SystemSettingController extends Controller
 {
@@ -29,5 +30,16 @@ class SystemSettingController extends Controller
         $saved = $this->settings->upsertMany($data['settings']);
 
         return response()->json($saved);
+    }
+
+    public function refreshCache()
+    {
+        Cache::flush();
+        $this->settings->flushCache();
+
+        return response()->json([
+            'refreshed' => true,
+            'timestamp' => now()->toIso8601String(),
+        ]);
     }
 }

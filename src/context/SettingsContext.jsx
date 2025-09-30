@@ -1,9 +1,35 @@
 import { createContext, useCallback, useContext, useEffect, useMemo, useState } from 'react';
 import { api } from '../services/api.js';
 
+const SETTINGS_CACHE_KEY = 'supermarket:last-settings';
+
+function readCachedSettings() {
+  if (typeof window === 'undefined') return null;
+  try {
+    const raw = window.localStorage.getItem(SETTINGS_CACHE_KEY);
+    if (!raw) return null;
+    const parsed = JSON.parse(raw);
+    if (parsed && typeof parsed === 'object') {
+      return normalizeSettings(parsed);
+    }
+  } catch (err) {
+    console.warn('Failed to read cached settings', err);
+  }
+  return null;
+}
+
+function writeCachedSettings(settings) {
+  if (typeof window === 'undefined') return;
+  try {
+    window.localStorage.setItem(SETTINGS_CACHE_KEY, JSON.stringify(settings));
+  } catch (err) {
+    console.warn('Failed to cache settings', err);
+  }
+}
+
 const SettingsContext = createContext({
   settings: {
-    storeName: 'Shop',
+    storeName: '',
     currency: {
       code: 'KES',
       symbol: 'KES',
@@ -22,6 +48,8 @@ const SettingsContext = createContext({
       brandImageText: '',
       brandImageStyle: 'classic',
       brandImageBadge: '',
+      brandImageShape: 'rounded',
+      brandNameScale: 1,
     },
   },
   loading: true,
@@ -31,7 +59,7 @@ const SettingsContext = createContext({
 });
 
 const DEFAULT_SETTINGS = {
-  storeName: 'Shop',
+  storeName: '',
   currency: {
     code: 'KES',
     symbol: 'KES',
@@ -50,11 +78,13 @@ const DEFAULT_SETTINGS = {
     brandImageText: '',
     brandImageStyle: 'classic',
     brandImageBadge: '',
+    brandImageShape: 'rounded',
+    brandNameScale: 1,
   },
 };
 
 export function SettingsProvider({ children }) {
-  const [settings, setSettings] = useState(DEFAULT_SETTINGS);
+  const [settings, setSettings] = useState(() => readCachedSettings() ?? DEFAULT_SETTINGS);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(null);
 
@@ -65,9 +95,15 @@ export function SettingsProvider({ children }) {
       const res = await api.settings.get();
       const normalized = normalizeSettings(res);
       setSettings(normalized);
+      writeCachedSettings(normalized);
     } catch (err) {
       setError(err?.message || 'Unable to load settings');
-      setSettings(DEFAULT_SETTINGS);
+      setSettings(prev => {
+        if (prev && prev !== DEFAULT_SETTINGS) {
+          return prev;
+        }
+        return readCachedSettings() ?? DEFAULT_SETTINGS;
+      });
     } finally {
       setLoading(false);
     }
@@ -130,6 +166,8 @@ function normalizeSettings(raw) {
     brandImageText: normalizeString(raw['branding.brand_image_text'] || raw.branding?.brandImageText || raw.branding?.brand_image_text || DEFAULT_SETTINGS.branding.brandImageText),
     brandImageStyle: normalizeBrandImageStyle(raw['branding.brand_image_style'] || raw.branding?.brandImageStyle || raw.branding?.brand_image_style || DEFAULT_SETTINGS.branding.brandImageStyle),
     brandImageBadge: normalizeBrandImageBadge(raw['branding.brand_image_badge'] || raw.branding?.brandImageBadge || raw.branding?.brand_image_badge || DEFAULT_SETTINGS.branding.brandImageBadge),
+    brandImageShape: normalizeBrandImageShape(raw['branding.brand_image_shape'] || raw.branding?.brandImageShape || raw.branding?.brand_image_shape || DEFAULT_SETTINGS.branding.brandImageShape),
+    brandNameScale: normalizeBrandNameScale(raw['branding.brand_name_scale'] || raw.branding?.brandNameScale || raw.branding?.brand_name_scale || DEFAULT_SETTINGS.branding.brandNameScale),
   };
 
   return {
@@ -157,6 +195,25 @@ function normalizeBrandImageBadge(value) {
   if (!normalized) return '';
   const allowed = ['cart-burst', 'delivery-van', 'storefront-awning', 'price-tag', 'reward-badge', 'basket-fruits'];
   return allowed.includes(normalized) ? normalized : '';
+}
+
+function normalizeBrandImageShape(value) {
+  const normalized = normalizeString(value).toLowerCase();
+  if (!normalized) return DEFAULT_SETTINGS.branding.brandImageShape;
+  const allowed = ['square', 'rounded', 'circle', 'pill', 'squircle'];
+  return allowed.includes(normalized) ? normalized : DEFAULT_SETTINGS.branding.brandImageShape;
+}
+
+function normalizeBrandNameScale(value) {
+  if (value == null || value === '') {
+    return DEFAULT_SETTINGS.branding.brandNameScale;
+  }
+  const parsed = Number(value);
+  if (!Number.isFinite(parsed)) {
+    return DEFAULT_SETTINGS.branding.brandNameScale;
+  }
+  const clamped = Math.min(1.8, Math.max(0.6, parsed));
+  return Number.isInteger(clamped) ? clamped : Math.round(clamped * 100) / 100;
 }
 
 function formatWithSettings(currency, amount, override = {}) {

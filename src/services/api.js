@@ -542,7 +542,8 @@ export const api = {
         fd.append('file', file);
         if (type) fd.append('type', type);
         return request('/admin/system-settings/assets', { method: 'POST', body: fd });
-      }
+      },
+      refreshCache: () => request('/admin/system-settings/cache/refresh', { method: 'POST' })
     },
     productTags: {
       list: ({ page = 0, size = 20, q, sort = 'name', direction = 'asc' } = {}) => {

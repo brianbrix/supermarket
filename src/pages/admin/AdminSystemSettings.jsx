@@ -150,9 +150,41 @@ const ECOMMERCE_BADGES = [
   }
 ];
 
-function drawRoundedRect(ctx, x, y, width, height, radius) {
+const BRAND_IMAGE_SHAPES = [
+  {
+    id: 'square',
+    label: 'Sharp corners',
+    description: 'Crisp edges for a bold, structured presence.',
+  },
+  {
+    id: 'rounded',
+    label: 'Rounded',
+    description: 'Soft 16px radius that feels modern and friendly.',
+  },
+  {
+    id: 'circle',
+    label: 'Circle',
+    description: 'Perfectly circular badge for avatar-style marks.',
+  },
+  {
+    id: 'pill',
+    label: 'Pill',
+    description: 'Elongated capsule that hugs wider wordmarks.',
+  },
+  {
+    id: 'squircle',
+    label: 'Squircle',
+    description: 'A curvy square that balances sharp and soft.',
+  },
+];
+
+const BRAND_IMAGE_SHAPE_IDS = new Set(BRAND_IMAGE_SHAPES.map(shape => shape.id));
+const DEFAULT_BRAND_IMAGE_SHAPE = BRAND_IMAGE_SHAPES.find(shape => shape.id === 'rounded')?.id
+  || BRAND_IMAGE_SHAPES[0]?.id
+  || 'square';
+
+function traceRoundedRectPath(ctx, x, y, width, height, radius) {
   const r = Math.min(radius, width / 2, height / 2);
-  ctx.beginPath();
   ctx.moveTo(x + r, y);
   ctx.lineTo(x + width - r, y);
   ctx.quadraticCurveTo(x + width, y, x + width, y + r);
@@ -162,8 +194,38 @@ function drawRoundedRect(ctx, x, y, width, height, radius) {
   ctx.quadraticCurveTo(x, y + height, x, y + height - r);
   ctx.lineTo(x, y + r);
   ctx.quadraticCurveTo(x, y, x + r, y);
+}
+
+function drawRoundedRect(ctx, x, y, width, height, radius) {
+  const r = Math.min(radius, width / 2, height / 2);
+  ctx.beginPath();
+  traceRoundedRectPath(ctx, x, y, width, height, r);
   ctx.closePath();
   ctx.fill();
+}
+
+function applyBrandShapeClip(ctx, width, height, shape) {
+  const normalized = (shape || '').toLowerCase();
+  if (!normalized || normalized === 'square') {
+    return;
+  }
+  ctx.beginPath();
+  if (normalized === 'circle') {
+    const radius = Math.min(width, height) / 2;
+    ctx.arc(width / 2, height / 2, radius, 0, Math.PI * 2);
+  } else {
+    let radius;
+    if (normalized === 'pill') {
+      radius = Math.min(width, height) / 2;
+    } else if (normalized === 'squircle') {
+      radius = Math.min(width, height) * 0.32;
+    } else {
+      radius = Math.min(width, height) * 0.18;
+    }
+    traceRoundedRectPath(ctx, 0, 0, width, height, radius);
+  }
+  ctx.closePath();
+  ctx.clip();
 }
 
 function createCanvas(width, height) {
@@ -217,12 +279,20 @@ function getBadgePreviewSrc(badge) {
   return `data:image/svg+xml;charset=utf-8,${encodeURIComponent(badge.svg)}`;
 }
 
-async function renderBrandImageFromPreset(text, preset, { badge } = {}) {
+async function renderBrandImageFromPreset(text, preset, { badge, shape } = {}) {
   const width = Math.max(320, Math.round(preset.width || 640));
   const height = Math.max(160, Math.round(preset.height || 320));
   const canvas = createCanvas(width, height);
   const ctx = canvas.getContext('2d');
   if (!ctx) throw new Error('Canvas rendering is not supported in this browser.');
+
+  const requestedShape = typeof shape === 'string' ? shape.toLowerCase() : undefined;
+  const resolvedShape = requestedShape && BRAND_IMAGE_SHAPE_IDS.has(requestedShape)
+    ? requestedShape
+    : DEFAULT_BRAND_IMAGE_SHAPE;
+
+  ctx.save();
+  applyBrandShapeClip(ctx, width, height, resolvedShape);
 
   // Background fill
   if (preset.background?.type === 'gradient' && Array.isArray(preset.background.stops) && preset.background.stops.length >= 2) {
@@ -328,6 +398,7 @@ async function renderBrandImageFromPreset(text, preset, { badge } = {}) {
     }
   }
 
+  ctx.restore();
   return canvas.toDataURL('image/png', 0.92);
 }
 
@@ -390,6 +461,8 @@ const DEFAULT_FORM = {
   brandImageText: '',
   brandImageStyle: 'classic',
   brandImageBadge: '',
+  brandImageShape: DEFAULT_BRAND_IMAGE_SHAPE,
+  brandNameScale: 1,
   deliveryBaseFee: 150,
   deliveryPerKmFee: 35,
   deliveryMinFee: 120,
@@ -417,6 +490,8 @@ const KEY_MAP = {
   brandImageText: 'branding.brand_image_text',
   brandImageStyle: 'branding.brand_image_style',
   brandImageBadge: 'branding.brand_image_badge',
+  brandImageShape: 'branding.brand_image_shape',
+  brandNameScale: 'branding.brand_name_scale',
   deliveryBaseFee: 'delivery.base_fee',
   deliveryPerKmFee: 'delivery.per_km_fee',
   deliveryMinFee: 'delivery.min_fee',
@@ -444,6 +519,8 @@ const FIELD_TYPES = {
   brandImageText: 'string',
   brandImageStyle: 'string',
   brandImageBadge: 'string',
+  brandImageShape: 'string',
+  brandNameScale: 'number',
   deliveryBaseFee: 'number',
   deliveryPerKmFee: 'number',
   deliveryMinFee: 'number',
@@ -462,6 +539,7 @@ export default function AdminSystemSettings() {
   const [form, setForm] = useState(DEFAULT_FORM);
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
+  const [refreshingCache, setRefreshingCache] = useState(false);
   const [error, setError] = useState(null);
   const [logoUploading, setLogoUploading] = useState(false);
   const [brandImageUploading, setBrandImageUploading] = useState(false);
@@ -630,6 +708,19 @@ export default function AdminSystemSettings() {
     }));
   }, []);
 
+  const handleBrandImageShapeSelect = useCallback((shapeId) => {
+    if (!shapeId) return;
+    const normalized = String(shapeId).toLowerCase();
+    if (!BRAND_IMAGE_SHAPE_IDS.has(normalized)) return;
+    setForm(prev => {
+      if (prev.brandImageShape === normalized) return prev;
+      return {
+        ...prev,
+        brandImageShape: normalized,
+      };
+    });
+  }, []);
+
   const handleClearLogo = useCallback(() => {
     setForm(prev => ({
       ...prev,
@@ -664,9 +755,12 @@ export default function AdminSystemSettings() {
   }, []);
 
   const brandImageSource = form.brandImageSource || 'upload';
+  const normalizedShape = typeof form.brandImageShape === 'string' ? form.brandImageShape.toLowerCase() : DEFAULT_BRAND_IMAGE_SHAPE;
+  const brandImageShape = BRAND_IMAGE_SHAPE_IDS.has(normalizedShape) ? normalizedShape : DEFAULT_BRAND_IMAGE_SHAPE;
   const debouncedBrandText = useDebounce(form.brandImageText, 400);
   const debouncedBrandStyle = useDebounce(form.brandImageStyle, 150);
   const debouncedBrandBadge = useDebounce(form.brandImageBadge, 150);
+  const debouncedBrandShape = useDebounce(brandImageShape, 150);
 
   useEffect(() => {
     if (brandImageSource !== 'text') {
@@ -687,7 +781,7 @@ export default function AdminSystemSettings() {
   const styleId = debouncedBrandStyle || BRAND_STYLE_PRESETS[0].id;
   const preset = findPreset(styleId);
   const badge = findBadge(debouncedBrandBadge);
-  renderBrandImageFromPreset(trimmed, preset, { badge })
+  renderBrandImageFromPreset(trimmed, preset, { badge, shape: debouncedBrandShape })
       .then((dataUrl) => {
         if (cancelled) return;
         setForm(prev => (prev.brandImage === dataUrl ? prev : { ...prev, brandImage: dataUrl }));
@@ -702,7 +796,7 @@ export default function AdminSystemSettings() {
         setBrandImageGenerating(false);
       });
     return () => { cancelled = true; };
-  }, [brandImageSource, debouncedBrandText, debouncedBrandStyle, debouncedBrandBadge, findPreset, findBadge, push]);
+  }, [brandImageSource, debouncedBrandText, debouncedBrandStyle, debouncedBrandBadge, debouncedBrandShape, findPreset, findBadge, push]);
 
   const logoPreview = (form.systemLogo || '').trim();
   const brandImagePreview = (form.brandImage || '').trim();
@@ -750,6 +844,29 @@ export default function AdminSystemSettings() {
       });
   }
 
+  function handleRefreshCache() {
+    if (refreshingCache) return;
+    setError(null);
+    setRefreshingCache(true);
+    const refresher = api?.admin?.systemSettings?.refreshCache;
+    const refreshPromise = typeof refresher === 'function'
+      ? refresher()
+      : Promise.reject(new Error('Cache refresh API is not available.'));
+
+    refreshPromise
+      .then(() => {
+        push('Application cache refreshed successfully.', 'success');
+      })
+      .catch(err => {
+        const message = err?.message || 'Failed to refresh cache';
+        setError(message);
+        push(message, 'danger');
+      })
+      .finally(() => {
+        setRefreshingCache(false);
+      });
+  }
+
   return (
     <section className="container-fluid py-4">
       <div className="d-flex justify-content-between align-items-center mb-3">
@@ -763,12 +880,66 @@ export default function AdminSystemSettings() {
           {error && <div className="alert alert-danger" role="alert">{error}</div>}
           <fieldset disabled={loading || saving} className="d-flex flex-column gap-4">
             <section>
+              <div className="d-flex flex-column flex-lg-row align-items-lg-center justify-content-between gap-3 p-3 border rounded-3 bg-body-secondary bg-opacity-25">
+                <div>
+                  <h2 className="h6 mb-1">Cache controls</h2>
+                  <p className="text-muted small mb-0">Refresh application cache to pull the latest configuration and branding updates into the storefront.</p>
+                </div>
+                <button
+                  type="button"
+                  className="btn btn-outline-primary d-inline-flex align-items-center gap-2"
+                  onClick={handleRefreshCache}
+                  disabled={refreshingCache || loading || saving}
+                >
+                  {refreshingCache ? (
+                    <>
+                      <span className="spinner-border spinner-border-sm" role="status" aria-hidden="true"></span>
+                      <span>Refreshing…</span>
+                    </>
+                  ) : (
+                    <>
+                      <i className="bi bi-arrow-repeat"></i>
+                      <span>Refresh cache</span>
+                    </>
+                  )}
+                </button>
+              </div>
+            </section>
+            <section>
               <h2 className="h5 mb-2">Store identity</h2>
               <p className="text-muted small mb-3">Shown in the navigation bar, emails and invoices.</p>
               <div className="row g-3">
                 <div className="col-12 col-md-6">
                   <label className="form-label" htmlFor="storeName">Store name</label>
                   <input id="storeName" name="storeName" type="text" className="form-control" value={form.storeName} onChange={handleChange} required />
+                </div>
+                <div className="col-12 col-md-6">
+                  <label className="form-label" htmlFor="brandNameScale">Site name size</label>
+                  <div className="d-flex flex-column gap-2">
+                    <input
+                      id="brandNameScale"
+                      name="brandNameScale"
+                      type="range"
+                      className="form-range"
+                      min="0.6"
+                      max="1.8"
+                      step="0.05"
+                      value={form.brandNameScale ?? 1}
+                      onChange={handleChange}
+                    />
+                    <div className="d-flex justify-content-between align-items-center small text-muted">
+                      <span>{Math.round((form.brandNameScale ?? 1) * 100)}%</span>
+                      <button
+                        type="button"
+                        className="btn btn-link btn-sm p-0"
+                        onClick={() => setForm(prev => ({ ...prev, brandNameScale: DEFAULT_FORM.brandNameScale }))}
+                        disabled={(form.brandNameScale ?? 1) === DEFAULT_FORM.brandNameScale}
+                      >
+                        Reset
+                      </button>
+                    </div>
+                  </div>
+                  <p className="form-text">Controls the navigation brand text size for better alignment with uploaded logos.</p>
                 </div>
                 <div className="col-12">
                   <div className="row g-3">
@@ -822,19 +993,53 @@ export default function AdminSystemSettings() {
                             <div className="spinner-border spinner-border-sm text-success" role="status" aria-label="Processing brand image"></div>
                           )}
                         </div>
-                        <div className="brand-preview border bg-white rounded-3 mb-3 position-relative overflow-hidden" style={{ minHeight: '160px' }}>
+                        <div
+                          className={`brand-preview border bg-white rounded-3 mb-3 position-relative overflow-hidden brand-preview--shape-${brandImageShape} brand-shape-surface`}
+                          style={{ minHeight: '160px' }}
+                          data-shape={brandImageShape}
+                        >
                           {(brandImageUploading || (brandImageGenerating && brandImageSource === 'text')) && (
                             <div className="position-absolute top-0 bottom-0 start-0 end-0 d-flex align-items-center justify-content-center bg-body bg-opacity-50">
                               <div className="spinner-border text-success" role="status" aria-label="Rendering brand image"></div>
                             </div>
                           )}
                           {brandImagePreview ? (
-                            <img src={brandImagePreview} alt="Brand image preview" style={{ width: '100%', height: '100%', objectFit: 'contain' }} />
+                            <img
+                              src={brandImagePreview}
+                              alt="Brand image preview"
+                              className={`brand-preview-image brand-preview-image--${brandImageShape} brand-shape-surface`}
+                              style={{ width: '100%', height: '100%', objectFit: 'contain' }}
+                              data-shape={brandImageShape}
+                            />
                           ) : (
                             <div className="w-100 h-100 d-flex align-items-center justify-content-center text-muted text-center px-3 small">
                               {brandImageSource === 'text' ? 'Enter a brand phrase and pick a style to generate artwork.' : 'No brand image uploaded yet.'}
                             </div>
                           )}
+                        </div>
+                        <div className="brand-shape-selector mb-3">
+                          <span className="form-label small text-muted d-block mb-2">Brand image shape</span>
+                          <div className="row g-2" role="list">
+                            {BRAND_IMAGE_SHAPES.map((shapeOption) => {
+                              const isActive = brandImageShape === shapeOption.id;
+                              return (
+                                <div className="col-6 col-lg-4" key={shapeOption.id} role="listitem">
+                                  <button
+                                    type="button"
+                                    className={`brand-shape-option btn btn-outline-secondary w-100 text-start${isActive ? ' active' : ''}`}
+                                    onClick={() => handleBrandImageShapeSelect(shapeOption.id)}
+                                    aria-pressed={isActive}
+                                  >
+                                    <span className={`brand-shape-swatch brand-shape-swatch--${shapeOption.id} mb-2`} aria-hidden="true">
+                                      <span className="brand-shape-swatch-inner brand-shape-surface" data-shape={shapeOption.id}></span>
+                                    </span>
+                                    <span className="d-block fw-semibold small">{shapeOption.label}</span>
+                                    <span className="d-block text-muted small">{shapeOption.description}</span>
+                                  </button>
+                                </div>
+                              );
+                            })}
+                          </div>
                         </div>
                         <div className="btn-group w-100 mb-3" role="group" aria-label="Brand image source">
                           <input type="radio" className="btn-check" name="brandImageSource" id="brandImageSourceUpload" value="upload" checked={brandImageSource === 'upload'} onChange={() => handleBrandImageSourceChange('upload')} />
@@ -1126,6 +1331,17 @@ function applySettingsToForm(settings) {
   if (typeof map.brandImageBadge !== 'string') {
     map.brandImageBadge = DEFAULT_FORM.brandImageBadge;
   }
+  if (typeof map.brandImageShape === 'string') {
+    const normalized = map.brandImageShape.toLowerCase();
+    map.brandImageShape = BRAND_IMAGE_SHAPE_IDS.has(normalized) ? normalized : DEFAULT_FORM.brandImageShape;
+  } else {
+    map.brandImageShape = DEFAULT_FORM.brandImageShape;
+  }
+  if (typeof map.brandNameScale !== 'number' || Number.isNaN(map.brandNameScale)) {
+    map.brandNameScale = DEFAULT_FORM.brandNameScale;
+  } else {
+    map.brandNameScale = Math.min(Math.max(map.brandNameScale, 0.6), 1.8);
+  }
   return map;
 }
 
@@ -1151,6 +1367,13 @@ function formToPayload(form) {
     if (field === 'brandImageSource') {
       const normalized = String(value || '').toLowerCase();
       value = ['text', 'upload'].includes(normalized) ? normalized : DEFAULT_FORM.brandImageSource;
+    }
+    if (field === 'brandImageShape') {
+      const normalized = String(value || '').toLowerCase();
+      value = BRAND_IMAGE_SHAPE_IDS.has(normalized) ? normalized : DEFAULT_FORM.brandImageShape;
+    }
+    if (field === 'brandNameScale') {
+      value = Math.min(Math.max(Number(value) || DEFAULT_FORM.brandNameScale, 0.6), 1.8);
     }
 
     return {
