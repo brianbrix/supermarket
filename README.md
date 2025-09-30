@@ -1,4 +1,4 @@
-# KenSuper Monorepo (React + Laravel)
+# Shop Monorepo (React + Laravel)
 
 Modern Kenyan supermarket experience powered by a Vite/React SPA (`/src`) and a Laravel 10 API (`/backend-php`). This repository now ships with performance-focused front-end tweaks, cached recommendation queries, and a production-ready Docker Compose stack (frontend, backend, PostgreSQL, Redis).
 
@@ -39,7 +39,7 @@ npm run dev
 Default dev server: <http://localhost:5173>. Configure the API origin via `.env`:
 ```
 VITE_API_BASE_URL=http://localhost:8081/api
-VITE_BRAND_NAME=KenSuper
+VITE_BRAND_NAME=Shop
 ```
 
 ### Backend (Laravel)

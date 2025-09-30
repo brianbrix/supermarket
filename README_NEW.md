@@ -1,4 +1,4 @@
-## KenSuper – Minimal Kenyan Supermarket Front-end
+## Shop – Minimal Supermarket Front-end
 
 A lightweight demo supermarket UI built with React + Vite. Focused on simplicity and local (Kenyan) context: staple products, KES currency formatting, and a very small feature set.
 

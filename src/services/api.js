@@ -536,7 +536,13 @@ export const api = {
     },
     systemSettings: {
       list: () => request('/admin/system-settings'),
-      save: (settings) => request('/admin/system-settings', { method: 'POST', body: JSON.stringify({ settings }) })
+      save: (settings) => request('/admin/system-settings', { method: 'POST', body: JSON.stringify({ settings }) }),
+      uploadAsset: (file, { type } = {}) => {
+        const fd = new FormData();
+        fd.append('file', file);
+        if (type) fd.append('type', type);
+        return request('/admin/system-settings/assets', { method: 'POST', body: fd });
+      }
     },
     productTags: {
       list: ({ page = 0, size = 20, q, sort = 'name', direction = 'asc' } = {}) => {

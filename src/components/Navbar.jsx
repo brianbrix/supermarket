@@ -13,6 +13,10 @@ export default function Navbar() {
   const { theme, toggleTheme } = useTheme();
   const { settings } = useSettings();
   const brandName = settings?.storeName || BRAND_NAME;
+  const branding = settings?.branding || {};
+  const brandLogo = (branding.systemLogo || '').trim();
+  const brandLogoAlt = branding.systemLogoAlt || `${brandName} logo`;
+  const brandImage = (branding.brandImage || '').trim();
   const canToggleTheme = settings?.theme?.enableDarkMode !== false;
   const [open, setOpen] = useState(false);
   const [userMenuOpen, setUserMenuOpen] = useState(false);
@@ -33,9 +37,20 @@ export default function Navbar() {
     setOpen(false);
   }
   return (
-  <nav className="navbar navbar-expand-md bg-body border-bottom sticky-top py-2" data-bs-theme={theme} role="navigation" aria-label="Main navigation"> 
+    <nav className="navbar navbar-expand-md bg-body border-bottom sticky-top py-2" data-bs-theme={theme} role="navigation" aria-label="Main navigation"> 
       <div className="container-fluid">
-  <Link className="navbar-brand fw-bold text-success fs-3" to="/">{brandName}</Link>
+        <Link className="navbar-brand d-flex align-items-center gap-2 fw-bold text-success fs-3" to="/">
+          {(brandLogo || brandImage) ? (
+            <span className="navbar-brand-mark d-inline-flex align-items-center justify-content-center">
+              <img
+                src={brandLogo || brandImage}
+                alt={brandLogo ? brandLogoAlt : `${brandName} brand mark`}
+                className={`navbar-brand-logo ${brandLogo ? '' : 'navbar-brand-logo--generated'}`.trim()}
+              />
+            </span>
+          ) : null}
+          <span className="navbar-brand-text">{brandName}</span>
+        </Link>
         <button className="navbar-toggler" type="button" aria-controls="mainNavLinks" aria-label="Toggle navigation" aria-expanded={open} onClick={()=>setOpen(o=>!o)}>
           <span className="navbar-toggler-icon"></span>
         </button>

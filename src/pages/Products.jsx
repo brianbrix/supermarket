@@ -246,6 +246,11 @@ export default function Products() {
   const { settings } = useSettings();
   const storeName = settings?.storeName || BRAND_NAME;
   const [sectionFilters, setSectionFilters] = useState(initialParsed);
+  const staticFiltersKey = useMemo(
+    () => JSON.stringify(sectionFilters.staticFilters ?? {}),
+    [sectionFilters.staticFilters]
+  );
+  const staticFiltersRef = useRef(sectionFilters.staticFilters);
   const [collectionTitle, setCollectionTitle] = useState(initialParsed.collectionTitle);
   const [query, setQuery] = useState(initialParsed.state.query || '');
   const [brandIds, setBrandIds] = useState(() => (initialBrandIdsRef.current ?? []));
@@ -275,6 +280,10 @@ export default function Products() {
   const activeCollectionTitle = (collectionTitle ?? '').trim();
   const locationSearchRef = useRef(location.search);
   const locationPathRef = useRef(location.pathname);
+
+  useEffect(() => {
+    staticFiltersRef.current = sectionFilters.staticFilters;
+  }, [staticFiltersKey, sectionFilters.staticFilters]);
 
   useEffect(() => {
     categoriesRef.current = categories;
@@ -619,7 +628,8 @@ export default function Products() {
       return;
     }
 
-    const filtersKey = `${filtersNoPageKey}|page=${page}|scope=${sectionFilters.staticFilters.scope || ''}|tags=${(sectionFilters.staticFilters.tags || []).join(',')}|promo=${sectionFilters.staticFilters.promoTag || ''}|ids=${(sectionFilters.staticFilters.ids || []).join(',')}|minRating=${sectionFilters.staticFilters.minRating ?? ''}|trend=${sectionFilters.staticFilters.trendingDays ?? ''}`;
+  const activeStaticFilters = staticFiltersRef.current ?? {};
+  const filtersKey = `${filtersNoPageKey}|page=${page}|scope=${activeStaticFilters.scope || ''}|tags=${(activeStaticFilters.tags || []).join(',')}|promo=${activeStaticFilters.promoTag || ''}|ids=${(activeStaticFilters.ids || []).join(',')}|minRating=${activeStaticFilters.minRating ?? ''}|trend=${activeStaticFilters.trendingDays ?? ''}`;
     if (filtersKey === lastSearchKeyRef.current) return;
 
     if (!initialSearchSkippedRef.current) {
@@ -643,7 +653,7 @@ export default function Products() {
       page,
       size
     };
-    applyStaticFiltersToPayload(payload, sectionFilters.staticFilters);
+  applyStaticFiltersToPayload(payload, activeStaticFilters);
     if (debouncedQuery) payload.q = debouncedQuery;
     if (normalizedBrandIds.length > 0) {
       payload.brandIds = normalizedBrandIds;
@@ -662,7 +672,7 @@ export default function Products() {
       .then(pageResp => {
         if (cancelled || lastSearchKeyRef.current !== requestKey) return;
         const mapped = pageResp.content.map(mapProductResponse);
-        const hydrated = applyStaticFiltersToResults(mapped, sectionFilters.staticFilters);
+  const hydrated = applyStaticFiltersToResults(mapped, activeStaticFilters);
         setResults(hydrated);
         setPageMeta(pageResp);
         setLoading(false);
@@ -673,7 +683,7 @@ export default function Products() {
         setLoading(false);
       });
     return () => { cancelled = true; };
-  }, [debouncedQuery, debouncedBrandIds, debouncedCategory, debouncedRange.min, debouncedRange.max, debouncedInStock, page, baselineLoaded, size, sliderBounds.min, sliderBounds.max, sectionFilters.staticFilters]);
+  }, [debouncedQuery, debouncedBrandIds, debouncedCategory, debouncedRange.min, debouncedRange.max, debouncedInStock, page, baselineLoaded, size, sliderBounds.min, sliderBounds.max, staticFiltersKey]);
 
   useEffect(() => { setPage(0); }, [debouncedQuery, debouncedBrandIds, debouncedCategory, debouncedRange.min, debouncedRange.max, debouncedInStock]);
 

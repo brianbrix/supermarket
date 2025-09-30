@@ -3,7 +3,7 @@ import { api } from '../services/api.js';
 
 const SettingsContext = createContext({
   settings: {
-    storeName: 'KenSuper',
+    storeName: 'Shop',
     currency: {
       code: 'KES',
       symbol: 'KES',
@@ -14,6 +14,15 @@ const SettingsContext = createContext({
       default: 'light',
       enableDarkMode: true,
     },
+    branding: {
+      systemLogo: '',
+      systemLogoAlt: '',
+      brandImage: '',
+      brandImageSource: 'upload',
+      brandImageText: '',
+      brandImageStyle: 'classic',
+      brandImageBadge: '',
+    },
   },
   loading: true,
   error: null,
@@ -22,7 +31,7 @@ const SettingsContext = createContext({
 });
 
 const DEFAULT_SETTINGS = {
-  storeName: 'KenSuper',
+  storeName: 'Shop',
   currency: {
     code: 'KES',
     symbol: 'KES',
@@ -32,6 +41,15 @@ const DEFAULT_SETTINGS = {
   theme: {
     default: 'light',
     enableDarkMode: true,
+  },
+  branding: {
+    systemLogo: '',
+    systemLogoAlt: '',
+    brandImage: '',
+    brandImageSource: 'upload',
+    brandImageText: '',
+    brandImageStyle: 'classic',
+    brandImageBadge: '',
   },
 };
 
@@ -104,11 +122,41 @@ function normalizeSettings(raw) {
     enableDarkMode: Boolean(raw['theme.enableDarkMode'] ?? raw.theme?.enableDarkMode ?? DEFAULT_SETTINGS.theme.enableDarkMode),
   };
 
+  const branding = {
+    systemLogo: normalizeString(raw['branding.system_logo'] || raw.branding?.systemLogo || raw.branding?.system_logo || DEFAULT_SETTINGS.branding.systemLogo),
+    systemLogoAlt: normalizeString(raw['branding.system_logo_alt'] || raw.branding?.systemLogoAlt || raw.branding?.system_logo_alt || ''),
+    brandImage: normalizeString(raw['branding.brand_image'] || raw.branding?.brandImage || raw.branding?.brand_image || DEFAULT_SETTINGS.branding.brandImage),
+    brandImageSource: normalizeBrandImageSource(raw['branding.brand_image_source'] || raw.branding?.brandImageSource || raw.branding?.brand_image_source || DEFAULT_SETTINGS.branding.brandImageSource),
+    brandImageText: normalizeString(raw['branding.brand_image_text'] || raw.branding?.brandImageText || raw.branding?.brand_image_text || DEFAULT_SETTINGS.branding.brandImageText),
+    brandImageStyle: normalizeBrandImageStyle(raw['branding.brand_image_style'] || raw.branding?.brandImageStyle || raw.branding?.brand_image_style || DEFAULT_SETTINGS.branding.brandImageStyle),
+    brandImageBadge: normalizeBrandImageBadge(raw['branding.brand_image_badge'] || raw.branding?.brandImageBadge || raw.branding?.brand_image_badge || DEFAULT_SETTINGS.branding.brandImageBadge),
+  };
+
   return {
     storeName: raw['store.name'] || raw.storeName || DEFAULT_SETTINGS.storeName,
     currency,
     theme,
+    branding,
   };
+}
+
+function normalizeBrandImageSource(value) {
+  const normalized = normalizeString(value).toLowerCase();
+  return ['text', 'generated', 'upload'].includes(normalized) ? normalized : DEFAULT_SETTINGS.branding.brandImageSource;
+}
+
+function normalizeBrandImageStyle(value) {
+  const normalized = normalizeString(value).toLowerCase();
+  if (!normalized) return DEFAULT_SETTINGS.branding.brandImageStyle;
+  const allowed = ['classic', 'sunset-drift', 'lush-garden', 'midnight-neon', 'minimal-bold', 'sunrise-glass'];
+  return allowed.includes(normalized) ? normalized : DEFAULT_SETTINGS.branding.brandImageStyle;
+}
+
+function normalizeBrandImageBadge(value) {
+  const normalized = normalizeString(value).toLowerCase();
+  if (!normalized) return '';
+  const allowed = ['cart-burst', 'delivery-van', 'storefront-awning', 'price-tag', 'reward-badge', 'basket-fruits'];
+  return allowed.includes(normalized) ? normalized : '';
 }
 
 function formatWithSettings(currency, amount, override = {}) {
