@@ -1,3 +1,4 @@
+import { useEffect, useMemo, useState } from 'react';
 import ProductCard from '../ProductCard.jsx';
 import { STORE_THEMES, DEFAULT_STORE_THEME, normalizeStoreTheme } from '../../config/storeThemes.js';
 
@@ -181,6 +182,65 @@ const RICH_TEXT_THEMES = {
     headingColor: '#6d2b1e',
     bodyColor: '#7f3e31',
     accentColor: '#b8563d'
+  }
+};
+
+const IMAGE_BANNER_THEMES = {
+  'emerald-luxe': {
+    background: 'linear-gradient(120deg, #0f2d19 0%, #145a32 50%, #0f4930 100%)',
+    shadow: '0 40px 80px -48px rgba(8, 45, 25, 0.65)',
+    textColor: '#dcffe5',
+    eyebrowColor: '#a9f7c7',
+    headlineColor: '#ffffff',
+    bodyColor: '#d0f6de',
+    accentGlow: 'rgba(126, 255, 196, 0.45)',
+    cta: {
+      primary: { className: 'btn btn-success btn-lg shadow', style: { border: 'none' } },
+      outline: { className: 'btn btn-outline-light btn-lg border-light' },
+      link: { className: 'btn btn-link text-light fw-semibold px-0' }
+    }
+  },
+  'sunrise-breeze': {
+    background: 'linear-gradient(120deg, #fff9f0 0%, #ffe4cc 55%, #ffd0a8 100%)',
+    shadow: '0 32px 70px -40px rgba(213, 118, 45, 0.35)',
+    textColor: '#6a340d',
+    eyebrowColor: '#c55d17',
+    headlineColor: '#8a410f',
+    bodyColor: '#7c4d26',
+    accentGlow: 'rgba(255, 185, 120, 0.35)',
+    cta: {
+      primary: { className: 'btn btn-warning btn-lg text-dark fw-semibold shadow-sm', style: { border: 'none' } },
+      outline: { className: 'btn btn-outline-dark btn-lg' },
+      link: { className: 'btn btn-link text-dark fw-semibold px-0' }
+    }
+  },
+  'midnight-neon': {
+    background: 'linear-gradient(135deg, #111828 0%, #1d2b46 55%, #243a63 100%)',
+    shadow: '0 36px 80px -42px rgba(10, 18, 39, 0.65)',
+    textColor: '#d9e1ff',
+    eyebrowColor: '#84f0ff',
+    headlineColor: '#ffffff',
+    bodyColor: '#c0ccff',
+    accentGlow: 'rgba(108, 217, 255, 0.35)',
+    cta: {
+      primary: { className: 'btn btn-primary btn-lg shadow-sm' },
+      outline: { className: 'btn btn-outline-light btn-lg border-light text-light' },
+      link: { className: 'btn btn-link text-light fw-semibold px-0' }
+    }
+  },
+  'crisp-minimal': {
+    background: 'linear-gradient(130deg, #f6fbff 0%, #edf4ff 50%, #e2ecff 100%)',
+    shadow: '0 36px 76px -48px rgba(31, 60, 95, 0.28)',
+    textColor: '#1c2d40',
+    eyebrowColor: '#2a6ec4',
+    headlineColor: '#132338',
+    bodyColor: '#2f4760',
+    accentGlow: 'rgba(59, 126, 214, 0.12)',
+    cta: {
+      primary: { className: 'btn btn-info btn-lg text-dark fw-semibold', style: { border: 'none' } },
+      outline: { className: 'btn btn-outline-primary btn-lg' },
+      link: { className: 'btn btn-link px-0 fw-semibold text-primary' }
+    }
   }
 };
 
@@ -455,22 +515,124 @@ export function PromoStripSection({ section }) {
 }
 
 export function ImageBannerSection({ section, theme, experienceTheme, experienceKey }) {
+  const slides = useMemo(() => {
+    if (Array.isArray(section.media?.slides)) {
+      return section.media.slides.filter(slide => slide && slide.url);
+    }
+    if (section.media?.imageUrl) {
+      return [{ id: section.media.id || `${section.id}-legacy`, url: section.media.imageUrl, alt: section.title || 'Banner image' }];
+    }
+    return [];
+  }, [section.media, section.id, section.title]);
+
   const fallbackSurface = experienceTheme?.page?.surface || (theme === 'dark' ? '#0f2d19' : '#e1f7e7');
-  const backgroundColor = section.media?.backgroundColor || fallbackSurface;
+  const themeKey = section.style || section.theme || experienceTheme?.sectionDefaults?.imageBanner || 'emerald-luxe';
+  const bannerTheme = IMAGE_BANNER_THEMES[themeKey] ?? IMAGE_BANNER_THEMES['emerald-luxe'];
+  const background = section.media?.backgroundColor || bannerTheme.background || fallbackSurface;
+  const surfaceStyle = {
+    borderRadius: '36px',
+    padding: '2.5rem clamp(1.25rem, 4vw, 3.5rem)',
+    background,
+    boxShadow: bannerTheme.shadow || '0 24px 64px -42px rgba(14, 33, 24, 0.35)'
+  };
+
+  const [activeSlide, setActiveSlide] = useState(0);
+  useEffect(() => {
+    if (activeSlide >= slides.length) {
+      setActiveSlide(slides.length > 0 ? slides.length - 1 : 0);
+    }
+  }, [slides.length, activeSlide]);
+
+  useEffect(() => {
+    if (typeof window === 'undefined') return undefined;
+    if (slides.length <= 1) return undefined;
+    if (section.media?.autoplay === false) return undefined;
+    const interval = Math.max(Number(section.media?.interval) || 6000, 2500);
+    const timer = window.setInterval(() => {
+      setActiveSlide(prev => (prev + 1) % slides.length);
+    }, interval);
+    return () => {
+      window.clearInterval(timer);
+    };
+  }, [slides.length, section.media?.interval, section.media?.autoplay]);
+
+  const goTo = (index) => {
+    if (slides.length === 0) return;
+    const next = (index + slides.length) % slides.length;
+    setActiveSlide(next);
+  };
+
+  const ctaMode = (section.cta?.style || 'primary');
+  const ctaTheme = bannerTheme.cta?.[ctaMode] ?? bannerTheme.cta?.primary ?? { className: 'btn btn-success btn-lg' };
+  const eyebrowStyle = bannerTheme.eyebrowColor ? { color: bannerTheme.eyebrowColor } : undefined;
+  const headlineStyle = bannerTheme.headlineColor ? { color: bannerTheme.headlineColor } : undefined;
+  const bodyStyle = bannerTheme.bodyColor ? { color: bannerTheme.bodyColor } : undefined;
+  const textColorStyle = bannerTheme.textColor ? { color: bannerTheme.textColor } : undefined;
+  const accentGlow = bannerTheme.accentGlow ? { boxShadow: `0 0 80px 0 ${bannerTheme.accentGlow}` } : undefined;
 
   return (
     <section className="container px-3 px-sm-4" data-store-theme={experienceKey}>
-      <div className="rounded-4 p-4 p-md-5" style={{ backgroundColor }}>
-        <div className="row align-items-center g-4">
-          <div className="col-12 col-md-7">
-            <h2 className="h3 mb-2">{section.title || 'Special announcement'}</h2>
-            {section.description && <p className="mb-0">{section.description}</p>}
+      <div className="image-banner-surface" style={{ ...surfaceStyle, ...accentGlow }} data-theme={themeKey}>
+        <div className="row align-items-center g-4 g-xl-5">
+          <div className="col-12 col-lg-5">
+            <div className="image-banner-copy" style={textColorStyle}>
+              {section.eyebrow && <span className="image-banner__eyebrow text-uppercase fw-semibold small" style={eyebrowStyle}>{section.eyebrow}</span>}
+              <h2 className="image-banner__headline display-6 fw-bold" style={headlineStyle}>{section.title || 'Special announcement'}</h2>
+              {section.description && <p className="image-banner__body lead mb-4" style={bodyStyle}>{section.description}</p>}
+              {section.cta?.label && (
+                <a href={section.cta.href || '#'} className={ctaTheme.className || 'btn btn-success btn-lg'} style={ctaTheme.style}>
+                  {section.cta.label}
+                </a>
+              )}
+            </div>
           </div>
-          <div className="col-12 col-md-3 text-md-end">
-            {section.cta && (
-              <a href={section.cta.href || '#'} className="btn btn-success btn-lg">
-                {section.cta.label || 'Learn more'}
-              </a>
+          <div className="col-12 col-lg-7">
+            {slides.length === 0 ? (
+              <div className="image-banner-placeholder border rounded-4 bg-body-secondary text-muted p-4 text-center">
+                <p className="mb-0">Add banner images in the admin to see the carousel here.</p>
+              </div>
+            ) : (
+              <div className="image-banner-carousel" data-slide-count={slides.length}>
+                <div className="image-banner-carousel__frame">
+                  <div
+                    className="image-banner-carousel__track"
+                    style={{ width: `${slides.length * 100}%`, transform: `translateX(-${activeSlide * (100 / slides.length)}%)` }}
+                  >
+                    {slides.map((slide, idx) => (
+                      <div
+                        key={slide.id || `${section.id}-slide-${idx}`}
+                        className="image-banner-carousel__slide"
+                        style={{ width: `${100 / slides.length}%` }}
+                      >
+                        <img src={slide.url} alt={slide.alt || `Banner slide ${idx + 1}`} />
+                      </div>
+                    ))}
+                  </div>
+                </div>
+                {slides.length > 1 && (
+                  <>
+                    <div className="image-banner-carousel__controls">
+                      <button type="button" className="btn btn-light btn-sm shadow-sm" onClick={() => goTo(activeSlide - 1)} aria-label="Previous banner slide">
+                        <i className="bi bi-chevron-left" aria-hidden="true"></i>
+                      </button>
+                      <button type="button" className="btn btn-light btn-sm shadow-sm" onClick={() => goTo(activeSlide + 1)} aria-label="Next banner slide">
+                        <i className="bi bi-chevron-right" aria-hidden="true"></i>
+                      </button>
+                    </div>
+                    <div className="image-banner-carousel__dots">
+                      {slides.map((_, idx) => (
+                        <button
+                          key={`dot-${section.id}-${idx}`}
+                          type="button"
+                          className={`image-banner-carousel__dot${idx === activeSlide ? ' is-active' : ''}`}
+                          onClick={() => goTo(idx)}
+                          aria-label={`Go to slide ${idx + 1}`}
+                        ></button>
+                      ))}
+                    </div>
+                  </>
+                )}
+              </div>
             )}
           </div>
         </div>

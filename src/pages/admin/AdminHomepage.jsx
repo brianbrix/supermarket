@@ -98,6 +98,27 @@ function validateSection(section) {
         pushIssue('error', 'Image banner CTA link must start with "/" or "http(s)://".');
       }
     }
+    const slides = Array.isArray(section.media?.slides)
+      ? section.media.slides
+      : (section.media?.imageUrl ? [{ url: section.media.imageUrl }] : []);
+    if (!Array.isArray(section.media?.slides) && section.media?.imageUrl) {
+      // legacy support, no validation issues when single legacy image present
+    }
+    if (slides.length === 0) {
+      pushIssue('warning', 'Add at least one slide image so the banner has visual impact.');
+    }
+    if (slides.length > 5) {
+      pushIssue('error', 'Image banner supports a maximum of five slides.');
+    }
+    const slideErrors = slides.map((slide) => {
+      if (!slide || !slide.url) {
+        return 'Image URL required';
+      }
+      return null;
+    });
+    if (slides.length > 0 && slideErrors.some(Boolean)) {
+      fieldErrors.slides = slideErrors;
+    }
   }
 
   if (section.type === 'rich-text') {
@@ -220,16 +241,29 @@ const SECTION_LIBRARY = {
     template: () => ({
       id: `banner-${Date.now()}`,
       type: 'image-banner',
+      style: 'emerald-luxe',
+      eyebrow: 'Weekend freshness',
       title: 'Free delivery over KSh 2,500',
       description: 'Schedule a delivery slot that works for you and we will handle the rest.',
-      theme: 'success',
       media: {
-        imageUrl: null,
-        backgroundColor: '#e1f7e7'
+        backgroundColor: '#0f2d19',
+        slides: [
+          {
+            id: `banner-slide-${Date.now()}-1`,
+            url: 'https://images.unsplash.com/photo-1514996937319-344454492b37?auto=format&fit=crop&w=1200&q=80',
+            alt: 'Fresh groceries packed in a bag'
+          },
+          {
+            id: `banner-slide-${Date.now()}-2`,
+            url: 'https://images.unsplash.com/photo-1504674900247-0877df9cc836?auto=format&fit=crop&w=1200&q=80',
+            alt: 'Assorted vegetables on a table'
+          }
+        ]
       },
       cta: {
         label: 'See delivery options',
-        href: '/delivery'
+        href: '/delivery',
+        style: 'primary'
       }
     })
   },
@@ -288,6 +322,13 @@ const RICH_TEXT_THEME_OPTIONS = [
   { value: 'calm-paper', label: 'Calm paper' },
   { value: 'sunset-quartz', label: 'Sunset quartz' },
   { value: 'nocturne', label: 'Nocturne' }
+];
+
+const IMAGE_BANNER_THEME_OPTIONS = [
+  { value: 'emerald-luxe', label: 'Emerald luxe (deep green glow)' },
+  { value: 'sunrise-breeze', label: 'Sunrise breeze (golden gradients)' },
+  { value: 'midnight-neon', label: 'Midnight neon (dark with neon accents)' },
+  { value: 'crisp-minimal', label: 'Crisp minimal (light modern)' }
 ];
 
 const clone = (value) => JSON.parse(JSON.stringify(value));
@@ -1606,51 +1647,300 @@ function PromoStripSectionEditor({ value, onChange, errors = {}, tagOptions = []
 }
 
 function ImageBannerSectionEditor({ value, onChange, errors = {} }) {
+  const toast = useToast();
+  const [uploading, setUploading] = useState(false);
+  const maxSlides = 5;
+
+  const slides = useMemo(() => {
+    if (Array.isArray(value.media?.slides)) {
+      return value.media.slides.slice(0, maxSlides);
+    }
+    if (value.media?.imageUrl) {
+      return [
+        {
+          id: value.media.id || `legacy-slide-${value.id}`,
+          url: value.media.imageUrl,
+          alt: value.title || 'Banner image'
+        }
+      ];
+    }
+    return [];
+  }, [value, maxSlides]);
+
   const update = (field, fieldValue) => onChange({ ...value, [field]: fieldValue });
-  const updateMedia = (field, fieldValue) => onChange({ ...value, media: { ...(value.media ?? {}), [field]: fieldValue } });
+  const updateMedia = (updater) => {
+    const nextMedia = typeof updater === 'function'
+      ? updater({ ...(value.media ?? {}) })
+      : { ...(value.media ?? {}), ...(updater ?? {}) };
+    onChange({ ...value, media: nextMedia });
+  };
   const updateCta = (field, fieldValue) => onChange({ ...value, cta: { ...(value.cta ?? {}), [field]: fieldValue } });
 
+  const syncSlides = (nextSlides) => {
+    updateMedia(media => {
+      const cleaned = { ...media, slides: nextSlides };
+      if (cleaned.imageUrl) delete cleaned.imageUrl;
+      return cleaned;
+    });
+  };
+
+  const handleSlideChange = (index, updater) => {
+    const nextSlides = slides.map((slide, idx) => {
+      if (idx !== index) return slide;
+      return typeof updater === 'function' ? updater(slide) : { ...slide, ...updater };
+    });
+    syncSlides(nextSlides);
+  };
+
+  const handleRemoveSlide = (index) => {
+    const nextSlides = slides.filter((_, idx) => idx !== index);
+    syncSlides(nextSlides);
+  };
+
+  const handleMoveSlide = (index, direction) => {
+    const targetIndex = index + direction;
+    if (targetIndex < 0 || targetIndex >= slides.length) return;
+    const nextSlides = [...slides];
+    const temp = nextSlides[index];
+    nextSlides[index] = nextSlides[targetIndex];
+    nextSlides[targetIndex] = temp;
+    syncSlides(nextSlides);
+  };
+
+  const readFileAsDataUrl = (file) => new Promise((resolve, reject) => {
+    const reader = new FileReader();
+    reader.onload = () => resolve(reader.result);
+    reader.onerror = () => reject(reader.error || new Error('Failed to read file'));
+    reader.readAsDataURL(file);
+  });
+
+  const uploadSlide = async (file, indexOffset = 0) => {
+    if (typeof api?.admin?.homepageLayouts?.uploadMedia === 'function') {
+      const response = await api.admin.homepageLayouts.uploadMedia(file);
+      const url = response?.url || response?.data?.url || response?.location || response?.absoluteUrl;
+      if (!url) {
+        throw new Error('Upload succeeded but returned no URL.');
+      }
+      return {
+        id: `banner-slide-${Date.now()}-${indexOffset}`,
+        url,
+        alt: file.name ? file.name.replace(/\.[^.]+$/, '').trim() || 'Banner slide' : 'Banner slide'
+      };
+    }
+    const dataUrl = await readFileAsDataUrl(file);
+    return {
+      id: `banner-slide-${Date.now()}-${indexOffset}`,
+      url: dataUrl,
+      alt: file.name ? file.name.replace(/\.[^.]+$/, '').trim() || 'Banner slide' : 'Banner slide',
+      isInlineData: true
+    };
+  };
+
+  const handleFileSelect = async (event) => {
+    const files = Array.from(event.target.files || []);
+    event.target.value = '';
+    if (files.length === 0) return;
+    const available = maxSlides - slides.length;
+    if (available <= 0) {
+      toast.push('You already have five slides in this banner.', 'warning');
+      return;
+    }
+    const queue = files.slice(0, available);
+    setUploading(true);
+    const created = [];
+    let fallbackNoticeShown = false;
+    for (let i = 0; i < queue.length; i += 1) {
+      const file = queue[i];
+      try {
+        const slide = await uploadSlide(file, i);
+        created.push(slide);
+      } catch (err) {
+        console.error('Banner slide upload failed', err);
+        try {
+          const dataUrl = await readFileAsDataUrl(file);
+          created.push({
+            id: `banner-slide-${Date.now()}-${i}-inline`,
+            url: dataUrl,
+            alt: file.name ? file.name.replace(/\.[^.]+$/, '').trim() || 'Banner slide' : 'Banner slide',
+            isInlineData: true
+          });
+          if (!fallbackNoticeShown) {
+            toast.push((err?.message ? `${err.message}. ` : '') + 'Falling back to embedded image data. Consider trying again later.', 'warning');
+            fallbackNoticeShown = true;
+          }
+        } catch (readErr) {
+          console.error('Failed to read banner slide as data URL', readErr);
+          toast.push(err?.message || `Failed to upload ${file.name || 'image'}.`, 'error');
+        }
+      }
+    }
+    if (created.length > 0) {
+      syncSlides([...slides, ...created]);
+    }
+    setUploading(false);
+  };
+
+  const themeValue = value.style || value.theme || 'emerald-luxe';
+  const backgroundColor = value.media?.backgroundColor ?? '';
+
   return (
-    <div className="row g-3">
-      <div className="col-12 col-md-6">
-        <label className="form-label" htmlFor={`banner-title-${value.id}`}>Title</label>
-        <input id={`banner-title-${value.id}`} className="form-control" value={value.title || ''} onChange={e => update('title', e.target.value)} />
+    <div className="vstack gap-3">
+      <div className="row g-3">
+        <div className="col-12 col-md-3">
+          <label className="form-label" htmlFor={`banner-eyebrow-${value.id}`}>Eyebrow</label>
+          <input id={`banner-eyebrow-${value.id}`} className="form-control" value={value.eyebrow || ''} onChange={e => update('eyebrow', e.target.value)} placeholder="Quick highlight" />
+        </div>
+        <div className="col-12 col-md-5">
+          <label className="form-label" htmlFor={`banner-title-${value.id}`}>Headline</label>
+          <input id={`banner-title-${value.id}`} className="form-control" value={value.title || ''} onChange={e => update('title', e.target.value)} placeholder="Free delivery over KSh 2,500" />
+        </div>
+        <div className="col-12 col-md-4">
+          <label className="form-label" htmlFor={`banner-style-${value.id}`}>Theme</label>
+          <select
+            id={`banner-style-${value.id}`}
+            className="form-select"
+            value={themeValue}
+            onChange={e => update('style', e.target.value)}
+          >
+            {IMAGE_BANNER_THEME_OPTIONS.map(option => (
+              <option key={option.value} value={option.value}>{option.label}</option>
+            ))}
+          </select>
+          <div className="form-text">Switch typography + accent treatments for the left text block.</div>
+        </div>
       </div>
-      <div className="col-12 col-md-6">
-        <label className="form-label" htmlFor={`banner-theme-${value.id}`}>Theme</label>
-        <select id={`banner-theme-${value.id}`} className="form-select" value={value.theme || 'success'} onChange={e => update('theme', e.target.value)}>
-          <option value="success">Success</option>
-          <option value="info">Info</option>
-          <option value="warning">Warning</option>
-          <option value="danger">Danger</option>
-        </select>
+      <div className="row g-3">
+        <div className="col-12 col-md-8">
+          <label className="form-label" htmlFor={`banner-description-${value.id}`}>Supporting copy</label>
+          <textarea
+            id={`banner-description-${value.id}`}
+            className="form-control"
+            rows={3}
+            value={value.description || ''}
+            onChange={e => update('description', e.target.value)}
+            placeholder="Schedule a delivery slot that works for you and we will handle the rest."
+          ></textarea>
+        </div>
+        <div className="col-12 col-md-4">
+          <label className="form-label" htmlFor={`banner-background-${value.id}`}>Background override</label>
+          <input
+            id={`banner-background-${value.id}`}
+            className="form-control"
+            value={backgroundColor}
+            onChange={e => {
+              const nextValue = e.target.value;
+              updateMedia(media => {
+                const next = { ...(media ?? {}) };
+                if (!nextValue.trim()) delete next.backgroundColor;
+                else next.backgroundColor = nextValue;
+                return next;
+              });
+            }}
+            placeholder="#0f2d19"
+          />
+          <div className="form-text">Optional hex/gradient overrides. Leave blank to use theme default.</div>
+        </div>
       </div>
-      <div className="col-12">
-        <label className="form-label" htmlFor={`banner-description-${value.id}`}>Description</label>
-        <textarea id={`banner-description-${value.id}`} className="form-control" rows={2} value={value.description || ''} onChange={e => update('description', e.target.value)}></textarea>
+
+      <div className="row g-3">
+        <div className="col-12 col-md-4">
+          <label className="form-label" htmlFor={`banner-cta-label-${value.id}`}>CTA label</label>
+          <input id={`banner-cta-label-${value.id}`} className="form-control" value={value.cta?.label || ''} onChange={e => updateCta('label', e.target.value)} placeholder="See delivery options" />
+        </div>
+        <div className="col-12 col-md-5">
+          <label className="form-label" htmlFor={`banner-cta-href-${value.id}`}>CTA link</label>
+          <input
+            id={`banner-cta-href-${value.id}`}
+            className={`form-control${errors.ctaHref ? ' is-invalid' : ''}`}
+            value={value.cta?.href || ''}
+            onChange={e => updateCta('href', e.target.value)}
+            placeholder="/delivery"
+          />
+          {errors.ctaHref && <div className="invalid-feedback">{errors.ctaHref}</div>}
+          <div className="form-text">Accepts internal "/path" or full https:// links.</div>
+        </div>
+        <div className="col-12 col-md-3">
+          <label className="form-label" htmlFor={`banner-cta-style-${value.id}`}>CTA style</label>
+          <select
+            id={`banner-cta-style-${value.id}`}
+            className="form-select"
+            value={value.cta?.style || 'primary'}
+            onChange={e => updateCta('style', e.target.value)}
+          >
+            <option value="primary">Solid button</option>
+            <option value="outline">Outline button</option>
+            <option value="link">Text link</option>
+          </select>
+          <div className="form-text">Preview updates instantly in the live preview.</div>
+        </div>
       </div>
-      <div className="col-12 col-md-6">
-        <label className="form-label" htmlFor={`banner-image-${value.id}`}>Image URL</label>
-        <input id={`banner-image-${value.id}`} className="form-control" value={value.media?.imageUrl || ''} onChange={e => updateMedia('imageUrl', e.target.value)} placeholder="https://…" />
-      </div>
-      <div className="col-12 col-md-3">
-        <label className="form-label" htmlFor={`banner-background-${value.id}`}>Background color</label>
-        <input id={`banner-background-${value.id}`} className="form-control" value={value.media?.backgroundColor || ''} onChange={e => updateMedia('backgroundColor', e.target.value)} placeholder="#e1f7e7" />
-      </div>
-      <div className="col-12 col-md-3">
-        <label className="form-label" htmlFor={`banner-cta-label-${value.id}`}>CTA label</label>
-        <input id={`banner-cta-label-${value.id}`} className="form-control" value={value.cta?.label || ''} onChange={e => updateCta('label', e.target.value)} />
-      </div>
-      <div className="col-12 col-md-4">
-        <label className="form-label" htmlFor={`banner-cta-href-${value.id}`}>CTA link</label>
+
+      <div className="border rounded p-3">
+        <div className="d-flex justify-content-between align-items-center mb-2">
+          <div>
+            <strong className="small">Carousel images</strong>
+            <div className="text-muted small">Upload up to five slides. They appear to the right of the copy block.</div>
+          </div>
+          <span className="badge text-bg-secondary">{slides.length}/{maxSlides}</span>
+        </div>
         <input
-          id={`banner-cta-href-${value.id}`}
-          className={`form-control${errors.ctaHref ? ' is-invalid' : ''}`}
-          value={value.cta?.href || ''}
-          onChange={e => updateCta('href', e.target.value)}
-          placeholder="/delivery"
+          type="file"
+          accept="image/*"
+          multiple
+          className="form-control form-control-sm"
+          disabled={uploading || slides.length >= maxSlides}
+          onChange={handleFileSelect}
         />
-        {errors.ctaHref && <div className="invalid-feedback">{errors.ctaHref}</div>}
+        {uploading && <div className="form-text text-success mt-1">Uploading…</div>}
+        {errors.slides && Array.isArray(errors.slides) && errors.slides.some(Boolean) && (
+          <div className="alert alert-danger py-2 small mt-3" role="alert">
+            <ul className="mb-0 ps-3">
+              {errors.slides.map((message, idx) => message ? <li key={`slide-error-${idx}`}>Slide {idx + 1}: {message}</li> : null)}
+            </ul>
+          </div>
+        )}
+        {slides.length === 0 ? (
+          <p className="text-muted small mb-0 mt-3">Add at least one image to unlock the banner carousel.</p>
+        ) : (
+          <div className="vstack gap-2 mt-3">
+            {slides.map((slide, idx) => (
+              <div key={slide.id || `${value.id}-slide-${idx}`} className="border rounded p-2">
+                <div className="row g-2 align-items-center">
+                  <div className="col-12 col-md-3">
+                    <div className="ratio ratio-16x9" style={{ borderRadius: 8, overflow: 'hidden', background: '#f3f5f6' }}>
+                      {slide.url ? (
+                        <img src={slide.url} alt={slide.alt || `Slide ${idx + 1}`} style={{ objectFit: 'cover' }} />
+                      ) : (
+                        <div className="d-flex align-items-center justify-content-center text-muted small">No image</div>
+                      )}
+                    </div>
+                  </div>
+                  <div className="col-12 col-md-6">
+                    <label className="form-label form-label-sm" htmlFor={`banner-slide-alt-${value.id}-${idx}`}>Alt text</label>
+                    <input
+                      id={`banner-slide-alt-${value.id}-${idx}`}
+                      className="form-control form-control-sm"
+                      value={slide.alt || ''}
+                      onChange={e => handleSlideChange(idx, { alt: e.target.value })}
+                    />
+                    <div className="form-text">Describe the slide for accessibility.</div>
+                  </div>
+                  <div className="col-12 col-md-3 d-flex gap-1 justify-content-end">
+                    <button type="button" className="btn btn-outline-secondary btn-sm" onClick={() => handleMoveSlide(idx, -1)} disabled={idx === 0}>
+                      <i className="bi bi-arrow-up" aria-hidden="true"></i>
+                    </button>
+                    <button type="button" className="btn btn-outline-secondary btn-sm" onClick={() => handleMoveSlide(idx, 1)} disabled={idx === slides.length - 1}>
+                      <i className="bi bi-arrow-down" aria-hidden="true"></i>
+                    </button>
+                    <button type="button" className="btn btn-outline-danger btn-sm" onClick={() => handleRemoveSlide(idx)}>
+                      <i className="bi bi-trash" aria-hidden="true"></i>
+                    </button>
+                  </div>
+                </div>
+              </div>
+            ))}
+          </div>
+        )}
       </div>
     </div>
   );

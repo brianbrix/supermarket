@@ -598,7 +598,12 @@ export const api = {
       get: (id) => request(`/admin/homepage/layouts/${id}`),
       update: (id, payload) => request(`/admin/homepage/layouts/${id}`, { method: 'PUT', body: JSON.stringify(payload) }),
       publish: (id) => request(`/admin/homepage/layouts/${id}/publish`, { method: 'POST' }),
-      remove: (id) => request(`/admin/homepage/layouts/${id}`, { method: 'DELETE' })
+      remove: (id) => request(`/admin/homepage/layouts/${id}`, { method: 'DELETE' }),
+      uploadMedia: (file) => {
+        const fd = new FormData();
+        fd.append('file', file);
+        return request('/admin/homepage/media', { method: 'POST', body: fd });
+      }
     }
   }
 };
