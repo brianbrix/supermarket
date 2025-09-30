@@ -15,12 +15,13 @@
     "bootstrap": "^5.3.3",
     "bootstrap-icons": "^1.11.3",
     "leaflet": "^1.9.4",
-  "qrcode": "^1.5.3",
-  "react": "^19.1.1",
-  "react-dom": "^19.1.1",
-  "react-hook-form": "^7.53.0",
-  "react-router-dom": "^6.28.0",
-  "react-bootstrap-typeahead": "^6.4.1"
+    "qrcode": "^1.5.3",
+    "react": "^19.1.1",
+    "react-bootstrap-typeahead": "^6.4.1",
+    "react-dom": "^19.1.1",
+    "react-hook-form": "^7.53.0",
+    "react-router-dom": "^6.28.0",
+    "sweetalert2": "^11.23.0"
   },
   "optionalDependencies": {
     "pdfmake": "^0.2.10"

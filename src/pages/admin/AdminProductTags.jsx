@@ -125,7 +125,8 @@ export default function AdminProductTags() {
   }
 
   async function handleDelete(id) {
-    if (!window.confirm('Delete this tag? Products will simply lose this tag.')) return;
+  const ok = await import('../../utils/swal.js').then(m => m.confirm({ title: 'Delete tag?', text: 'Products will simply lose this tag. Continue?', confirmButtonText: 'Delete', cancelButtonText: 'Cancel' }));
+  if (!ok) return;
     setError(null);
     try {
       await api.admin.productTags.delete(id);

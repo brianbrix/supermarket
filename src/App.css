@@ -93,6 +93,9 @@
 :root {
   --bg:var(--store-surface-page, #f7f9f8);
   --text:#1f2a24;
+  /* Bootstrap compatibility variables (fall back to our text color) */
+  --bs-body-color: var(--text);
+  --bs-body-bg: var(--bg);
   --surface:var(--store-surface, #ffffff);
   --surface-elevated:var(--store-surface-elevated, #f3f6f4);
   --border:var(--store-border, #dde4df);
@@ -106,6 +109,9 @@
 [data-theme='dark'] {
   --bg:var(--store-surface-page, #131819);
   --text:#e7ece9;
+  /* Ensure Bootstrap utility classes use our theme text color in dark mode */
+  --bs-body-color: var(--text);
+  --bs-body-bg: var(--bg);
   --surface:var(--store-surface, #1c2123);
   --surface-elevated:var(--store-surface-elevated, #22282b);
   --border:var(--store-border, #30383b);

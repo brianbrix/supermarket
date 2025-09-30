@@ -4,6 +4,7 @@ import { Typeahead } from 'react-bootstrap-typeahead';
 import { api, mapProductResponse } from '../../services/api.js';
 import FilterBar from '../../components/FilterBar.jsx';
 import PaginationBar from '../../components/PaginationBar.jsx';
+import { useToast } from '../../context/ToastContext.jsx';
 
 const makeEmptyForm = () => ({ name: '', brandId: '', brandName: '', categoryId: '', price: '', description: '', stock: '0', unit: '', tagSlugs: [] });
 
@@ -20,8 +21,8 @@ export default function AdminProducts() {
   const [multiUploading, setMultiUploading] = useState(false);
   const [multiError, setMultiError] = useState(null);
   const [search, setSearch] = useState('');
-  const [draftFilters, setDraftFilters] = useState({ brand:'', categoryId:'', minPrice:'', maxPrice:'', inStock:'', sort:'name', direction:'asc' });
-  const [appliedFilters, setAppliedFilters] = useState({ brand:'', categoryId:'', minPrice:'', maxPrice:'', inStock:'', sort:'name', direction:'asc' });
+  const [draftFilters, setDraftFilters] = useState({ brand:'', categoryId:'', minPrice:'', maxPrice:'', inStock:'', sort:'name', direction:'asc', includeArchived: false });
+  const [appliedFilters, setAppliedFilters] = useState({ brand:'', categoryId:'', minPrice:'', maxPrice:'', inStock:'', sort:'name', direction:'asc', includeArchived: false });
   const debounceRef = useRef();
   const firstDebounceRef = useRef(true); // skip the initial debounce which mirrors defaults
   const didInitialLoadRef = useRef(false); // guard StrictMode double invoke
@@ -44,6 +45,7 @@ export default function AdminProducts() {
   }, [brands]);
   const [submitting, setSubmitting] = useState(false);
   const [editingId, setEditingId] = useState(null);
+  const toast = useToast();
   const tagOptionsMemo = useMemo(() => {
     return [...tags]
       .map(tag => ({
@@ -119,6 +121,8 @@ export default function AdminProducts() {
       ...(minPrice? { minPrice } : {}),
       ...(maxPrice? { maxPrice } : {}),
       ...(inStock ? { inStock: inStock === 'true' } : {}),
+      // If includeArchived is false, ask admin API for active products only
+      ...(appliedFilters.includeArchived ? {} : { active: true }),
       sort, direction
     };
   api.admin.products.list(page, size, payload)
@@ -195,10 +199,10 @@ export default function AdminProducts() {
     clearTimeout(debounceRef.current);
     debounceRef.current = setTimeout(()=>{ setAppliedFilters(p=>({ ...p, ...draftFilters })); setPage(0); }, 400);
     return ()=>clearTimeout(debounceRef.current);
-  }, [search, draftFilters.brand, draftFilters.categoryId, draftFilters.minPrice, draftFilters.maxPrice, draftFilters.inStock]);
+  }, [search, draftFilters.brand, draftFilters.categoryId, draftFilters.minPrice, draftFilters.maxPrice, draftFilters.inStock, draftFilters.includeArchived]);
   function updateAdv(name,value){ setDraftFilters(f=>({...f,[name]:value})); }
   function applySort(e){ const [s,d]=e.target.value.split(':'); setDraftFilters(f=>({...f, sort:s, direction:d })); setAppliedFilters(a=>({...a, sort:s, direction:d })); setPage(0); load(true); }
-  function resetFilters(){ const base={ brand:'', categoryId:'', minPrice:'', maxPrice:'', inStock:'', sort:'name', direction:'asc' }; setDraftFilters(base); setAppliedFilters(base); setSearch(''); setPage(0); load(true); }
+  function resetFilters(){ const base={ brand:'', categoryId:'', minPrice:'', maxPrice:'', inStock:'', sort:'name', direction:'asc', includeArchived: false }; setDraftFilters(base); setAppliedFilters(base); setSearch(''); setPage(0); load(true); }
 
   function handleChange(e){
     const { name, value } = e.target;
@@ -340,8 +344,30 @@ export default function AdminProducts() {
   }
 
   async function handleDelete(id){
-    if (!window.confirm('Delete product?')) return;
-    try { await api.admin.products.delete(id); load(); } catch(e) { setError(e.message); }
+    // Explain that deletion will archive product if it exists in orders
+  const confirmed = await import('../../utils/swal.js').then(m => m.confirm({ title: 'Delete product?', text: 'If this product appears in existing orders it will be archived (kept for order history) instead of permanently removed. Continue?', confirmButtonText: 'Delete', cancelButtonText: 'Cancel' }));
+    if (!confirmed) return;
+    try {
+      const resp = await api.admin.products.delete(id);
+      // API returns { deleted: true, archived: true } when archived
+      if (resp?.archived) {
+        try { toast.push('Product archived and kept for order history', 'info'); } catch(e){}
+      } else if (resp?.deleted) {
+        try { toast.push('Product deleted', 'info'); } catch(e){}
+      }
+      load();
+    } catch(e) { setError(e.message); }
+  }
+
+  async function handleUnarchive(id){
+  const confirmed = await import('../../utils/swal.js').then(m => m.confirm({ title: 'Unarchive product?', text: 'Unarchive this product and make it visible in the storefront again?', confirmButtonText: 'Unarchive', cancelButtonText: 'Cancel' }));
+    if (!confirmed) return;
+    try {
+      // Patch product to set active = true
+      await api.admin.products.update(id, { active: true });
+      try { toast.push('Product restored (unarchived)', 'info'); } catch(e){}
+      load();
+    } catch(e) { setError(e.message); }
   }
 
   async function handleMultiUpload(fileList) {
@@ -368,7 +394,8 @@ export default function AdminProducts() {
 
   async function handleDeleteImage(imageId) {
     if (!editingId || imageId == null) return;
-    if (!window.confirm('Delete this image?')) return;
+  const keep = await import('../../utils/swal.js').then(m => m.confirm({ title: 'Delete image?', text: 'Delete this image?', confirmButtonText: 'Delete', cancelButtonText: 'Cancel' }));
+  if (!keep) return;
     try {
       await api.products.deleteImage(editingId, imageId);
       load();
@@ -430,6 +457,12 @@ export default function AdminProducts() {
             <option value="id:desc">ID Desc</option>
           </select>
         </FilterBar.Field>
+        <FilterBar.Field label="Archived" width="col-6 col-md-2">
+          <div className="form-check form-switch">
+            <input className="form-check-input" type="checkbox" id="showArchived" checked={!!draftFilters.includeArchived} onChange={e=>updateAdv('includeArchived', e.target.checked)} />
+            <label className="form-check-label small" htmlFor="showArchived">Show archived</label>
+          </div>
+        </FilterBar.Field>
   <FilterBar.Reset onClick={resetFilters} disabled={!search && !draftFilters.brand.trim() && !draftFilters.categoryId && !draftFilters.minPrice && !draftFilters.maxPrice && !draftFilters.inStock && draftFilters.sort==='name' && draftFilters.direction==='asc'} />
       </FilterBar>
       <div className="row">
@@ -444,10 +477,15 @@ export default function AdminProducts() {
                 </thead>
                 <tbody>
                   {products.map(p => (
-                    <tr key={p.id} className={p.stock === 0 ? 'table-warning' : ''}>
+                    <tr key={p.id} className={`${p.stock === 0 ? 'table-warning' : ''} ${!p.active ? 'table-secondary text-muted' : ''}`.trim()}>
                       <td style={{width:'54px'}}>{p.image ? <img src={p.image} alt={p.name} style={{width:'48px', height:'48px', objectFit:'cover'}}/> : <span className="text-muted small">—</span>}</td>
                       <td>
-                        <div>{p.name}</div>
+                        <div className="d-flex align-items-center">
+                          <div>{p.name}</div>
+                          {!p.active && (
+                            <span className="badge bg-warning text-dark ms-2 small" title="Archived">Archived</span>
+                          )}
+                        </div>
                         {Array.isArray(p.tags) && p.tags.length > 0 && (
                           <div className="text-muted small mt-1">
                             Tags: {p.tags.map(tag => tag?.name || tag?.slug).filter(Boolean).join(', ')}
@@ -460,7 +498,14 @@ export default function AdminProducts() {
                       <td>{p.stock ?? '-'}</td>
                       <td className="text-end">
                         <button className="btn btn-sm btn-outline-primary me-2" onClick={()=>handleEdit(p)}>Edit</button>
-                        <button className="btn btn-sm btn-outline-danger" onClick={()=>handleDelete(p.id)}>Del</button>
+                        {!p.active ? (
+                          <>
+                            <button className="btn btn-sm btn-outline-success me-2" onClick={()=>handleUnarchive(p.id)}>Unarchive</button>
+                            <button className="btn btn-sm btn-outline-danger" onClick={()=>handleDelete(p.id)}>Del</button>
+                          </>
+                        ) : (
+                          <button className="btn btn-sm btn-outline-danger" onClick={()=>handleDelete(p.id)}>Del</button>
+                        )}
                       </td>
                     </tr>
                   ))}

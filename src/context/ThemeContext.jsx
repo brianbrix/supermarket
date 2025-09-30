@@ -3,7 +3,9 @@ import { DEFAULT_STORE_THEME, normalizeStoreTheme } from '../config/storeThemes.
 
 const ThemeContext = createContext();
 
-const SOURCE_PRIORITY = { nav: 3, user: 3, admin: 2, system: 1 };
+// Priority: higher number wins. 'layout' is the theme source set by admin homepage layouts —
+// it should be stronger than system defaults but lower than explicit user/nav choices.
+const SOURCE_PRIORITY = { nav: 3, user: 3, admin: 2, layout: 2, system: 1 };
 
 function normalizeTheme(value) {
   return value === 'dark' ? 'dark' : 'light';

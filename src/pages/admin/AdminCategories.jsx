@@ -69,7 +69,8 @@ export default function AdminCategories(){
   }
 
   async function handleDelete(id){
-    if(!window.confirm('Delete category? Its direct products and child categories will be reassigned to the parent. Continue?')) return;
+  const ok = await import('../../utils/swal.js').then(m => m.confirm({ title: 'Delete category?', text: 'Its direct products and child categories will be reassigned to the parent. Continue?', confirmButtonText: 'Delete', cancelButtonText: 'Cancel' }));
+  if(!ok) return;
     try {
       await api.admin.categories.delete(id);
       refreshHierarchyOptions();

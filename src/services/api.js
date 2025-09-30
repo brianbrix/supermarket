@@ -420,13 +420,14 @@ export const api = {
       list: (page=0,size=10, filters={}) => {
         const params = new URLSearchParams();
         params.set('page', page); params.set('size', size);
-        const { q, brand, categoryId, minPrice, maxPrice, inStock, sort='name', direction='asc' } = filters;
+        const { q, brand, categoryId, minPrice, maxPrice, inStock, sort='name', direction='asc', active } = filters;
         if (q) params.set('q', q);
         if (brand) params.set('brand', brand);
         if (categoryId) params.set('categoryId', categoryId);
         if (minPrice != null) params.set('minPrice', minPrice);
         if (maxPrice != null) params.set('maxPrice', maxPrice);
         if (inStock != null) params.set('inStock', inStock);
+  if (active !== undefined && active !== null) params.set('active', active ? 'true' : 'false');
         if (sort) params.set('sort', sort);
         if (direction) params.set('direction', direction);
         return request(`/admin/products?${params.toString()}`);
@@ -662,6 +663,7 @@ export function mapProductResponse(raw) {
   return {
     id: p.id,
     name: p.name,
+    active: p.active !== false,
     brand: (p.brandName ?? p.brand ?? p.brand_name ?? '') || '',
     brandId: p.brandId ?? p.brand_id ?? null,
     brandName: p.brandName ?? p.brand ?? p.brand_name ?? '',

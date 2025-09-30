@@ -204,7 +204,8 @@ export default function AdminBrands() {
   }
 
   async function handleDelete(id) {
-    if (!window.confirm('Delete this brand? Products with this brand will lose the association.')) return;
+  const ok = await import('../../utils/swal.js').then(m => m.confirm({ title: 'Delete brand?', text: 'Products with this brand will lose the association. Continue?', confirmButtonText: 'Delete', cancelButtonText: 'Cancel' }));
+  if (!ok) return;
     setError(null);
     try {
       await api.admin.brands.delete(id);

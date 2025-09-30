@@ -530,9 +530,10 @@ export default function AdminHomepage() {
     }
   }
 
-  function handleSelectLayout(id) {
-    if (isDirty && !window.confirm('Discard unsaved changes?')) {
-      return;
+  async function handleSelectLayout(id) {
+    if (isDirty) {
+      const ok = await import('../../utils/swal.js').then(m => m.confirm({ title: 'Discard changes?', text: 'Discard unsaved changes?', confirmButtonText: 'Discard', cancelButtonText: 'Keep editing' }));
+      if (!ok) return;
     }
     setSelectedId(id);
     const target = layouts.find(l => l.id === id);
@@ -565,7 +566,7 @@ export default function AdminHomepage() {
 
     api.admin.homepageLayouts.create(layout)
       .then(created => {
-        toast.push('Draft layout created.', 'success');
+        import('../../utils/swal.js').then(m => m.success('Draft layout created.'));
         setShowCreate(false);
         setCreateForm({ slug: 'home', title: '', template: 'default' });
         setLayouts(prev => [created, ...prev]);
@@ -650,7 +651,7 @@ export default function AdminHomepage() {
     api.admin.homepageLayouts.update(draft.id, payload)
       .then(updated => {
         if (!silent) {
-          toast.push('Layout saved.', 'success');
+          import('../../utils/swal.js').then(m => m.success('Layout saved.'));
         }
         setLayouts(prev => prev.map(item => item.id === updated.id ? updated : item));
         setDraft(clone(updated));
@@ -678,7 +679,7 @@ export default function AdminHomepage() {
     setPublishing(true);
     api.admin.homepageLayouts.publish(draft.id)
       .then(updated => {
-        toast.push('Layout published and set active.', 'success');
+        import('../../utils/swal.js').then(m => m.success('Layout published and set active.'));
         setLayouts(prev => prev.map(item => item.id === updated.id ? updated : item));
         setDraft(clone(updated));
         setIsDirty(false);
@@ -689,16 +690,17 @@ export default function AdminHomepage() {
       .finally(() => setPublishing(false));
   }
 
-  function handleDelete() {
+  async function handleDelete() {
     if (!draft || draft.isActive) {
       toast.push('Cannot delete the active layout.', 'error');
       return;
     }
-    if (!window.confirm('Delete this layout? This action cannot be undone.')) return;
+    const ok = await import('../../utils/swal.js').then(m => m.confirm({ title: 'Delete layout?', text: 'This action cannot be undone.', confirmButtonText: 'Delete', cancelButtonText: 'Cancel' }));
+  if (!ok) return;
     setDeleting(true);
     api.admin.homepageLayouts.remove(draft.id)
       .then(() => {
-        toast.push('Layout deleted.', 'success');
+        import('../../utils/swal.js').then(m => m.success('Layout deleted.'));
         setLayouts(prev => prev.filter(item => item.id !== draft.id));
         setDraft(null);
         setSelectedId(null);

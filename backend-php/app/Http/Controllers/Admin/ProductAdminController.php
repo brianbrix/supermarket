@@ -16,6 +16,16 @@ class ProductAdminController extends Controller
     {
         // Eager load images so admin UI can render thumbnails / reorder without extra round-trips.
         $query = Product::query()->with(['category', 'images', 'tags', 'brand']);
+
+        // Admin may optionally filter to active/inactive products using ?active=1 or ?active=0
+        if ($request->has('active')) {
+            $active = $request->query('active');
+            if ($active === '1' || $active === 'true' || $active === 1 || $active === true) {
+                $query->where('active', true);
+            } elseif ($active === '0' || $active === 'false' || $active === '0') {
+                $query->where('active', false);
+            }
+        }
         if ($search = $request->query('q')) {
             $query->where(function ($q) use ($search) {
                 $like = '%' . addcslashes($search, '%_') . '%';
@@ -108,8 +118,11 @@ class ProductAdminController extends Controller
 
     public function destroy(Product $product)
     {
-        $product->delete();
-        return response()->json(['deleted'=>true]);
+        // If the product has related order items we cannot hard delete without losing order history.
+        // Archive (soft-disable) the product instead by setting active=false. Admins can still view inactive products via filters.
+        $product->active = false;
+        $product->save();
+        return response()->json(['deleted'=>true,'archived'=>true]);
     }
 
     private function transformProduct(Product $product): array
@@ -148,6 +161,7 @@ class ProductAdminController extends Controller
             'brandSlug' => $brandModel?->slug,
             'description' => $product->description,
             'price' => $product->price,
+            'active' => (bool)$product->active,
             'stock' => $product->stock,
             'unit' => $product->unit,
             'categoryId' => $product->category_id,

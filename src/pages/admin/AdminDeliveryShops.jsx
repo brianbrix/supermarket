@@ -150,8 +150,8 @@ export default function AdminDeliveryShops() {
 
   async function handleDelete(shop) {
     if (!shop?.id) return;
-    const confirmation = window.confirm(`Delete delivery shop "${shop.name}"? This cannot be undone.`);
-    if (!confirmation) return;
+  const ok = await import('../../utils/swal.js').then(m => m.confirm({ title: `Delete delivery shop "${shop.name}"?`, text: 'This cannot be undone.', confirmButtonText: 'Delete', cancelButtonText: 'Cancel' }));
+  if (!ok) return;
     try {
       await api.admin.deliveryShops.remove(shop.id);
       setShops(prev => prev.filter(item => item.id !== shop.id));

@@ -14,7 +14,7 @@ class Product extends Model
     use HasApiTokens, HasFactory;
 
     protected $fillable = [
-        'name','brand','brand_id','description','price','stock','unit','category_id','image_url'
+        'name','brand','brand_id','description','price','stock','unit','category_id','image_url','active'
     ];
 
     protected $casts = [
@@ -24,7 +24,20 @@ class Product extends Model
         'rating_sum' => 'integer',
         'rating_count' => 'integer',
         'rating_last_submitted_at' => 'datetime',
+        'active' => 'boolean',
     ];
+
+    protected $attributes = [
+        'active' => true,
+    ];
+
+    /**
+     * Scope to only active (not archived) products.
+     */
+    public function scopeActive($query)
+    {
+        return $query->where('active', true);
+    }
 
     public function category() {
         return $this->belongsTo(Category::class);

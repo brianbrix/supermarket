@@ -218,10 +218,10 @@ export default function AdminCoupons() {
     try {
       if (coupon.isActive) {
         await api.admin.coupons.deactivate(coupon.id);
-        toast.push(`Coupon ${coupon.code} deactivated`, 'success');
+        await import('../../utils/swal.js').then(m => m.success(`Coupon ${coupon.code} deactivated`));
       } else {
         await api.admin.coupons.activate(coupon.id);
-        toast.push(`Coupon ${coupon.code} activated`, 'success');
+        await import('../../utils/swal.js').then(m => m.success(`Coupon ${coupon.code} activated`));
       }
       setReloadTick(t => t + 1);
     } catch (err) {
@@ -232,11 +232,12 @@ export default function AdminCoupons() {
   }
 
   async function handleDelete(coupon) {
-    if (!window.confirm(`Delete coupon ${coupon.code}? This cannot be undone.`)) return;
+  const ok = await import('../../utils/swal.js').then(m => m.confirm({ title: `Delete coupon ${coupon.code}?`, text: 'This cannot be undone.', confirmButtonText: 'Delete', cancelButtonText: 'Cancel' }));
+  if (!ok) return;
     setActioningId(coupon.id);
     try {
       await api.admin.coupons.delete(coupon.id);
-      toast.push(`Coupon ${coupon.code} deleted`, 'success');
+      await import('../../utils/swal.js').then(m => m.success(`Coupon ${coupon.code} deleted`));
       if (editingId === coupon.id) {
         resetFormState();
       }
@@ -296,10 +297,10 @@ export default function AdminCoupons() {
 
       if (editingId) {
         await api.admin.coupons.update(editingId, payload);
-        toast.push('Coupon updated successfully.', 'success');
+        await import('../../utils/swal.js').then(m => m.success('Coupon updated successfully.'));
       } else {
         await api.admin.coupons.create(payload);
-        toast.push('Coupon created successfully.', 'success');
+        await import('../../utils/swal.js').then(m => m.success('Coupon created successfully.'));
       }
       resetFormState();
       setReloadTick(t => t + 1);

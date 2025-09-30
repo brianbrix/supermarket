@@ -19,10 +19,19 @@ class ProductController extends Controller
         $direction = strtolower($request->get('direction', 'asc')) === 'desc' ? 'desc' : 'asc';
         $allowed = ['name','brand','price','stock','id','created_at'];
         if (!in_array($sort, $allowed, true)) { $sort = 'name'; }
-        $query = Product::query()->with(['category', 'images', 'tags', 'brand']);
-    $pageSize = min(100, (int)$request->get('size', 20));
-    $paginator = $query->orderBy($sort, $direction)->paginate($pageSize);
-    return $this->pageResponse($paginator, ProductResource::collection($paginator->items()));
+
+        // Only surface active (not archived) products in public API
+        $query = Product::query()->with(['category', 'images', 'tags', 'brand'])->where('active', true);
+        $pageSize = min(100, (int)$request->get('size', 20));
+        // frontend uses zero-based page numbers; convert to Laravel's 1-based paginator
+        $page = (int) $request->get('page', 0);
+        // Ensure deterministic ordering by adding id as a final tie-breaker.
+        $query->orderBy($sort, $direction);
+        if ($sort !== 'id') {
+            $query->orderBy('id', 'asc');
+        }
+        $paginator = $query->paginate($pageSize, ['*'], 'page', max(1, $page + 1));
+        return $this->pageResponse($paginator, ProductResource::collection($paginator->items()));
     }
 
     public function search(Request $request)
@@ -41,7 +50,8 @@ class ProductController extends Controller
             $sort = 'name';
         }
 
-        $query = Product::query()->with(['category', 'images', 'tags', 'brand']);
+    // Public search should only include active products
+    $query = Product::query()->with(['category', 'images', 'tags', 'brand'])->where('active', true);
 
         if ($q) {
             $safeQ = str_replace(['%', '_'], ['\\%', '\\_'], $q);
@@ -152,7 +162,13 @@ class ProductController extends Controller
             $query->orderBy($sort, $direction);
         }
 
-        $paginator = $query->paginate($pageSize);
+        // frontend sends zero-based page index; convert to paginator page
+        $page = (int) $request->get('page', 0);
+        // Add stable tie-breaker ordering to avoid overlapping results across pages when primary ordering has duplicates
+        if ($sort !== 'id') {
+            $query->orderBy('id', 'asc');
+        }
+        $paginator = $query->paginate($pageSize, ['*'], 'page', max(1, $page + 1));
 
         return $this->pageResponse($paginator, ProductResource::collection($paginator->items()));
     }
@@ -184,6 +200,9 @@ class ProductController extends Controller
 
     public function show(Product $product)
     {
+        if (!$product->active) {
+            return response()->json(['message' => 'Product not found'], 404);
+        }
         $product->load([
             'category',
             'images' => function ($query) {
