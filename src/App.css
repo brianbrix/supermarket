@@ -241,6 +241,122 @@ a:hover { text-decoration:underline; }
 .layout { display:flex; flex-direction:column; }
 main { flex:1; width:100%; padding:1.5rem clamp(.75rem, 3vw, 1.5rem); }
 
+/* Admin layout navigation alignment */
+.admin-sidebar {
+  width: 240px;
+  min-width: 64px;
+  flex: 0 0 auto;
+  transition: width .28s ease, box-shadow .28s ease;
+}
+.admin-sidebar.is-collapsed {
+  width: 64px;
+}
+.admin-nav-group {
+  margin-bottom: .35rem;
+}
+.admin-nav-group .btn-toggle {
+  background: transparent;
+  border: none;
+  color: var(--text);
+  padding: .35rem .45rem;
+  display: grid;
+  grid-template-columns: 28px 1fr;
+  align-items: center;
+  gap: .5rem;
+  border-radius: 8px;
+  transition: background .2s ease, color .2s ease;
+}
+.admin-nav-group .btn-toggle:focus-visible {
+  outline: none;
+  box-shadow: 0 0 0 3px rgba(19,125,59,0.12);
+}
+.admin-nav-group .btn-toggle:hover {
+  background: rgba(19,125,59,0.08);
+}
+.admin-nav-group.is-open .btn-toggle {
+  background: rgba(19,125,59,0.12);
+}
+.admin-nav-group .btn-toggle .toggle-icon {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 24px;
+  height: 24px;
+  transition: transform .22s ease;
+}
+.admin-nav-group.is-open .btn-toggle .toggle-icon {
+  transform: rotate(90deg);
+}
+.admin-nav-group .group-title {
+  font-size: .82rem;
+  letter-spacing: .02em;
+  text-transform: uppercase;
+}
+.admin-nav-group .group-links {
+  margin-top: .15rem;
+  overflow: hidden;
+  max-height: 0;
+  opacity: 0;
+  transform: translateY(-6px);
+  transition: max-height .28s ease, opacity .2s ease, transform .24s ease;
+  will-change: max-height;
+}
+.admin-nav-group.is-open .group-links {
+  opacity: 1;
+  transform: translateY(0);
+}
+.admin-nav-group .group-links .nav-link {
+  padding: 0.32rem 0.45rem;
+  display: grid;
+  grid-template-columns: 28px 1fr;
+  align-items: center;
+  gap: .6rem;
+  border-radius: 8px;
+  transition: background .2s ease, color .2s ease;
+}
+.admin-nav-group .group-links .nav-link i {
+  width: 20px;
+  min-width: 20px;
+  text-align: center;
+  font-size: 1rem;
+}
+.admin-nav-group .group-links .nav-link.active {
+  background: rgba(19,125,59,0.16);
+  color: var(--accent);
+}
+
+.admin-sidebar.is-collapsed .btn-toggle {
+  grid-template-columns: 1fr;
+  justify-items: center;
+  padding: .4rem 0;
+}
+.admin-sidebar.is-collapsed .btn-toggle .group-title {
+  display: none !important;
+}
+.admin-sidebar.is-collapsed .group-links {
+  padding-left: 0 !important;
+}
+.admin-sidebar.is-collapsed .group-links .nav-link {
+  grid-template-columns: 1fr;
+  justify-content: center;
+  padding-left: 0;
+}
+.admin-sidebar.is-collapsed .group-links .nav-link span {
+  display: none !important;
+}
+
+/* Small helper to ensure icons and labels align visually */
+.admin-nav-group .group-links .nav-link i,
+.admin-nav-group .btn-toggle .toggle-icon {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+}
+.admin-layout .nav-link {
+  padding-top: .45rem;
+  padding-bottom: .45rem;
+}
+
 .nav { display:flex; gap:2rem; align-items:center; padding:.75rem 1rem; background:var(--surface); border-bottom:1px solid var(--border); position:sticky; top:0; z-index:10; }
 .nav .brand { font-weight:700; font-size:1.15rem; color:var(--accent); }
 .nav ul { list-style:none; display:flex; gap:1rem; padding:0; margin:0; }

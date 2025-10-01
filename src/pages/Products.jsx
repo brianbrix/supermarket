@@ -277,6 +277,8 @@ export default function Products() {
   const lastSearchKeyRef = useRef('');
   const lastFiltersNoPageRef = useRef('');
   const fetchingBrandKeysRef = useRef(new Set());
+  const pendingPriceRangeRef = useRef(false);
+  const priceRangeRequestIdRef = useRef(0);
   const activeCollectionTitle = (collectionTitle ?? '').trim();
   const locationSearchRef = useRef(location.search);
   const locationPathRef = useRef(location.pathname);
@@ -314,7 +316,7 @@ export default function Products() {
     } else {
       const match = list.find(cat => String(cat.id) === normalizedValue);
       if (!match) return;
-      const slug = toSlug(match.slug ?? match.raw?.slug ?? match.name);
+ 
       if (!slug) return;
       params.set('category', slug);
       params.set('categoryId', normalizedValue);
@@ -581,11 +583,14 @@ export default function Products() {
   const debouncedCategory = useDebounce(categoryId, 300);
 
   useEffect(() => {
-    let active = true;
+    const requestId = priceRangeRequestIdRef.current + 1;
+    priceRangeRequestIdRef.current = requestId;
+    pendingPriceRangeRef.current = true;
+    let cancelled = false;
     const catId = debouncedCategory !== 'all' ? debouncedCategory : undefined;
     api.products.priceRange(catId)
       .then(range => {
-        if (!active) return;
+        if (cancelled || priceRangeRequestIdRef.current !== requestId) return;
         const min = Number(range?.min ?? 0);
         const max = Number(range?.max ?? 0);
         setSliderBounds({ min, max });
@@ -598,8 +603,15 @@ export default function Products() {
           return { min: nextMin, max: nextMax };
         });
       })
-      .catch(() => {});
-    return () => { active = false; };
+      .catch(() => {
+        if (cancelled || priceRangeRequestIdRef.current !== requestId) return;
+        // leave slider bounds unchanged on error
+      })
+      .finally(() => {
+        if (cancelled || priceRangeRequestIdRef.current !== requestId) return;
+        pendingPriceRangeRef.current = false;
+      });
+    return () => { cancelled = true; };
   }, [debouncedCategory, sectionFilters.state.minPrice, sectionFilters.state.maxPrice]);
 
   useEffect(() => {
@@ -645,6 +657,10 @@ export default function Products() {
 
     lastFiltersNoPageRef.current = filtersNoPageKey;
     lastSearchKeyRef.current = filtersKey;
+    if (pendingPriceRangeRef.current) {
+      return;
+    }
+
     const requestKey = filtersKey;
     let cancelled = false;
     setLoading(true);
@@ -667,6 +683,11 @@ export default function Products() {
       payload.maxPrice = effectiveMax;
     }
     if (debouncedInStock) payload.inStock = true;
+
+    if (typeof window !== 'undefined' && window.__DEBUG_CATEGORY_FILTERS) {
+      // eslint-disable-next-line no-console
+      console.debug('[Products] search payload:', payload);
+    }
 
     api.products.search(payload)
       .then(pageResp => {

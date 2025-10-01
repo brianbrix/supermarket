@@ -4,6 +4,7 @@ namespace App\Http\Controllers\API;
 
 use App\Http\Controllers\Controller;
 use App\Models\Product;
+use App\Models\Category;
 use App\Http\Resources\ProductResource;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Cache;
@@ -122,7 +123,14 @@ class ProductController extends Controller
             }
         }
         if ($categoryId) {
-            $query->where('category_id', (int) $categoryId);
+            $category = Category::query()->find((int) $categoryId);
+            if ($category) {
+                $descendantIds = $category->descendantIds();
+                $categoryIds = array_unique(array_merge([$category->id], $descendantIds));
+                $query->whereIn('category_id', $categoryIds);
+            } else {
+                $query->where('category_id', (int) $categoryId);
+            }
         }
         if ($minPrice !== null && $minPrice !== '') {
             $query->where('price', '>=', (float) $minPrice);
@@ -181,9 +189,18 @@ class ProductController extends Controller
             : 'products:price-range:all';
 
         $range = Cache::remember($cacheKey, now()->addMinutes(10), function () use ($categoryId) {
-            $builder = Product::query();
+            $builder = Product::query()->where('active', true);
+
             if ($categoryId) {
-                $builder->where('category_id', (int) $categoryId);
+                $category = Category::query()->find((int) $categoryId);
+
+                if ($category) {
+                    $descendantIds = $category->descendantIds();
+                    $allIds = array_unique(array_merge([$category->id], $descendantIds));
+                    $builder->whereIn('category_id', $allIds);
+                } else {
+                    $builder->where('category_id', (int) $categoryId);
+                }
             }
 
             $min = $builder->min('price');

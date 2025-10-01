@@ -5,35 +5,40 @@ namespace App\Http\Controllers\API;
 use App\Http\Controllers\Controller;
 use App\Models\Category;
 use Illuminate\Http\Request;
+use Illuminate\Support\Facades\Cache;
 
 class CategoryController extends Controller
 {
     public function index() {
-        $categories = Category::query()
-            ->with('parent')
-            ->orderBy('path')
-            ->orderBy('name')
-            ->get();
+        $tree = Cache::remember('categories:tree:v1', now()->addMinutes(30), function () {
+            $categories = Category::query()
+                ->with('parent')
+                ->orderBy('path')
+                ->orderBy('name')
+                ->get();
 
-        $grouped = $categories->groupBy('parent_id');
+            $grouped = $categories->groupBy('parent_id');
 
-        $buildTree = function ($parentId) use (&$buildTree, $grouped) {
-            return $grouped->get($parentId, collect())->map(function ($cat) use (&$buildTree) {
-                return [
-                    'id' => $cat->id,
-                    'name' => $cat->name,
-                    'description' => $cat->description,
-                    'slug' => $cat->slug,
-                    'path' => $cat->path,
-                    'depth' => $cat->depth,
-                    'parentId' => $cat->parent_id,
-                    'fullName' => $cat->full_name,
-                    'children' => $buildTree($cat->id),
-                ];
-            })->values()->all();
-        };
+            $buildTree = function ($parentId) use (&$buildTree, $grouped) {
+                return $grouped->get($parentId, collect())->map(function ($cat) use (&$buildTree) {
+                    return [
+                        'id' => $cat->id,
+                        'name' => $cat->name,
+                        'description' => $cat->description,
+                        'slug' => $cat->slug,
+                        'path' => $cat->path,
+                        'depth' => $cat->depth,
+                        'parentId' => $cat->parent_id,
+                        'fullName' => $cat->full_name,
+                        'children' => $buildTree($cat->id),
+                    ];
+                })->values()->all();
+            };
 
-        return response()->json($buildTree(null));
+            return $buildTree(null);
+        });
+
+        return response()->json($tree);
     }
 
     public function store(Request $request) {
@@ -43,6 +48,7 @@ class CategoryController extends Controller
             'parent_id' => ['nullable','integer','exists:categories,id']
         ]);
         $category = Category::create($data);
+        Cache::forget('categories:tree:v1');
         return response()->json($category->fresh(), 201);
     }
 
@@ -64,6 +70,7 @@ class CategoryController extends Controller
             }
         }
         $category->update($data);
+        Cache::forget('categories:tree:v1');
         return $category->fresh();
     }
 
@@ -78,6 +85,7 @@ class CategoryController extends Controller
         // Null out products referencing this category
         $category->products()->update(['category_id' => $parentId]);
         $category->delete();
+        Cache::forget('categories:tree:v1');
         return response()->noContent();
     }
 }
