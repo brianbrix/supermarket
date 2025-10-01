@@ -82,6 +82,7 @@ export default function App() {
                     <Route path="/login" element={<CustomerLogin />} />
                     <Route path="/register" element={<Register />} />
                     <Route path="/admin" element={<Protected><AdminLayout /></Protected>}>
+                      <Route index element={<Navigate to="dashboard" replace />} />
                       <Route path="dashboard" element={<AdminDashboard />} />
                       <Route path="homepage" element={<AdminHomepage />} />
                       <Route path="products" element={<AdminProducts />} />

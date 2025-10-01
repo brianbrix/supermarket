@@ -106,6 +106,7 @@ class ProductAdminController extends Controller
             'unit' => ['sometimes','nullable','string','max:50'],
             'category_id' => ['sometimes','nullable','integer','exists:categories,id'],
             'image_url' => ['sometimes','nullable','string','max:500'],
+            'active' => ['sometimes','boolean'],
         ]);
         $normalized = $this->normalizeBrandPayload($data, $product);
         $product->update($normalized);
