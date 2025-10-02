@@ -29,6 +29,9 @@ class SystemSettingService
         'delivery.low_order_subsidy_factor' => 0.65,
         'delivery.cap_to_cart_total' => true,
         'delivery.autocomplete.provider' => 'photon',
+        'inventory.low_stock_threshold' => 5,
+        'orders.delay_alert_hours' => 6,
+        'orders.high_value_threshold' => 25000,
     ];
 
     private const CACHE_KEY_ALL = 'system-settings:all';

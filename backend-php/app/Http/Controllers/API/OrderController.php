@@ -13,6 +13,7 @@ use App\Models\Product;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Auth;
+use App\Services\AdminNotificationService;
 use App\Services\CouponService;
 use App\Services\DeliveryCostService;
 use Illuminate\Validation\ValidationException;
@@ -111,7 +112,7 @@ class OrderController extends Controller
         return new OrderResource($order);
     }
 
-    public function store(Request $request, CouponService $couponService, DeliveryCostService $deliveryCostService) {
+    public function store(Request $request, CouponService $couponService, DeliveryCostService $deliveryCostService, AdminNotificationService $notifications) {
         // accept both camelCase and snake_case just in case
         $request->merge([
             'customer_name' => $request->input('customer_name') ?? $request->input('customerName'),
@@ -177,7 +178,7 @@ class OrderController extends Controller
         $vatRate = 0.16; // Align with frontend constant
         $deliveryType = $normalizedDeliveryType;
 
-        return DB::transaction(function() use ($data, $vatRate, $request, $couponService, $deliveryType, $deliveryCostService) {
+        return DB::transaction(function() use ($data, $vatRate, $request, $couponService, $deliveryType, $deliveryCostService, $notifications) {
             $grossTotal = 0; $netTotal = 0; $vatTotal = 0;
             $authUser = $request->user('sanctum') ?? Auth::user();
             $order = Order::create([
@@ -190,6 +191,7 @@ class OrderController extends Controller
                 'total_net' => 0,
                 'vat_amount' => 0,
             ]);
+            $touchedProducts = [];
             foreach ($data['items'] as $line) {
                 $product = Product::lockForUpdate()->findOrFail($line['productId']);
                 if ($product->stock !== null && $product->stock < $line['quantity']) {
@@ -214,6 +216,7 @@ class OrderController extends Controller
                 if ($product->stock !== null) {
                     $product->stock -= $line['quantity'];
                     $product->save();
+                    $touchedProducts[$product->id] = $product->fresh();
                 }
             }
 
@@ -331,6 +334,17 @@ class OrderController extends Controller
             $order->setAttribute('totalBeforeDiscount', round($grossAfter + $discountAmount, 2));
             if ($createdDelivery) {
                 $order->setRelation('delivery', $createdDelivery->fresh('shop'));
+            }
+
+            try {
+                $notifications->notifyNewOrder($order);
+                $notifications->notifyHighValueOrder($order);
+                $notifications->notifyDeliveryRequest($order);
+                foreach ($touchedProducts as $product) {
+                    $notifications->notifyLowStock($product);
+                }
+            } catch (\Throwable $e) {
+                report($e);
             }
             return response()->json($order, 201);
         });

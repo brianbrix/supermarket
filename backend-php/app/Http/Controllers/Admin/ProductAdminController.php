@@ -9,9 +9,13 @@ use Illuminate\Support\Arr;
 use Illuminate\Support\Str;
 use App\Models\ProductTag;
 use App\Models\Brand;
+use App\Services\AdminNotificationService;
 
 class ProductAdminController extends Controller
 {
+    public function __construct(private AdminNotificationService $notifications)
+    {
+    }
     public function index(Request $request)
     {
         // Eager load images so admin UI can render thumbnails / reorder without extra round-trips.
@@ -91,6 +95,10 @@ class ProductAdminController extends Controller
         $product->load(['category', 'images', 'tags', 'brand']);
         $this->syncBrandCategoryPivot($product);
 
+        if ($product->stock !== null) {
+            $this->notifications->notifyLowStock($product);
+        }
+
         return response()->json($this->transformProduct($product), 201);
     }
 
@@ -109,10 +117,15 @@ class ProductAdminController extends Controller
             'active' => ['sometimes','boolean'],
         ]);
         $normalized = $this->normalizeBrandPayload($data, $product);
+        $originalStock = $product->stock;
         $product->update($normalized);
         $this->syncProductTags($product, $request);
         $product->load(['category', 'images', 'tags', 'brand']);
         $this->syncBrandCategoryPivot($product);
+
+        if (array_key_exists('stock', $normalized) && $normalized['stock'] !== $originalStock) {
+            $this->notifications->notifyLowStock($product);
+        }
 
         return response()->json($this->transformProduct($product));
     }

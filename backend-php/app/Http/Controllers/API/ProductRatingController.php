@@ -7,6 +7,7 @@ use App\Http\Resources\ProductRatingResource;
 use App\Models\OrderItem;
 use App\Models\Product;
 use App\Models\ProductRating;
+use App\Services\AdminNotificationService;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Str;
@@ -70,7 +71,7 @@ class ProductRatingController extends Controller
         ]);
     }
 
-    public function store(Product $product, Request $request)
+    public function store(Product $product, Request $request, AdminNotificationService $notifications)
     {
         $data = $request->validate([
             'rating' => ['required', 'integer', 'min:1', 'max:5'],
@@ -166,7 +167,15 @@ class ProductRatingController extends Controller
         });
 
         $status = $rating->wasRecentlyCreated ? 201 : 200;
-        $rating = $rating->fresh();
+        $rating = $rating->fresh(['product']);
+
+        if ($status === 201) {
+            try {
+                $notifications->notifyNewRating($rating);
+            } catch (\Throwable $e) {
+                report($e);
+            }
+        }
 
         return (new ProductRatingResource($rating))
             ->response()

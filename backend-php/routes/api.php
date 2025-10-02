@@ -13,6 +13,7 @@ use App\Http\Controllers\Admin\ProductRatingController as AdminProductRatingCont
 use App\Http\Controllers\Admin\CategoryAdminController;
 use App\Http\Controllers\Admin\PaymentOptionAdminController;
 use App\Http\Controllers\Admin\SystemSettingController as AdminSystemSettingController;
+use App\Http\Controllers\Admin\NotificationAdminController;
 use App\Http\Controllers\API\PaymentController;
 use App\Http\Controllers\API\OrderController;
 use App\Http\Controllers\API\PaymentOptionPublicController;
@@ -137,6 +138,9 @@ Route::middleware(['auth:sanctum','role:ADMIN'])->prefix('admin')->group(functio
     Route::get('/system-settings', [AdminSystemSettingController::class, 'index']);
     Route::post('/system-settings', [AdminSystemSettingController::class, 'upsert']);
     Route::post('/system-settings/cache/refresh', [AdminSystemSettingController::class, 'refreshCache']);
+    Route::get('/notifications', [NotificationAdminController::class, 'index']);
+    Route::post('/notifications/mark-all-read', [NotificationAdminController::class, 'markAllRead']);
+    Route::patch('/notifications/{notification}', [NotificationAdminController::class, 'update']);
     // Category mutations (restricted)
     // Read endpoints for admin UI (paged + search)
     Route::get('/categories', [CategoryAdminController::class, 'index']);
