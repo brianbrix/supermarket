@@ -2,6 +2,7 @@ import { useCallback, useEffect, useMemo, useState } from 'react';
 import { api } from '../../services/api.js';
 import { useToast } from '../../context/ToastContext.jsx';
 import { useDebounce } from '../../hooks/useDebounce.js';
+import AdminCollapsibleSection from '../../components/admin/AdminCollapsibleSection.jsx';
 
 const BRAND_STYLE_PRESETS = [
   {
@@ -463,17 +464,10 @@ const DEFAULT_FORM = {
   brandImageBadge: '',
   brandImageShape: DEFAULT_BRAND_IMAGE_SHAPE,
   brandNameScale: 1,
-  deliveryBaseFee: 150,
-  deliveryPerKmFee: 35,
-  deliveryMinFee: 120,
-  deliveryFreeAbove: 5000,
-  deliveryRoundingStep: 10,
-  deliveryDefaultRadius: 15,
-  deliveryMaxFeeRatio: 0.6,
-  deliveryMaxFeeAbsolute: 800,
-  deliveryLowOrderThreshold: 2000,
-  deliveryLowOrderFactor: 0.65,
-  deliveryCapToCart: true,
+  showBrandName: true,
+  lowStockThreshold: 5,
+  orderDelayAlertHours: 6,
+  orderHighValueThreshold: 25000,
 };
 
 const KEY_MAP = {
@@ -492,17 +486,10 @@ const KEY_MAP = {
   brandImageBadge: 'branding.brand_image_badge',
   brandImageShape: 'branding.brand_image_shape',
   brandNameScale: 'branding.brand_name_scale',
-  deliveryBaseFee: 'delivery.base_fee',
-  deliveryPerKmFee: 'delivery.per_km_fee',
-  deliveryMinFee: 'delivery.min_fee',
-  deliveryFreeAbove: 'delivery.free_above',
-  deliveryRoundingStep: 'delivery.rounding.step',
-  deliveryDefaultRadius: 'delivery.default_radius_km',
-  deliveryMaxFeeRatio: 'delivery.max_fee_ratio',
-  deliveryMaxFeeAbsolute: 'delivery.max_fee_absolute',
-  deliveryLowOrderThreshold: 'delivery.low_order_subsidy_threshold',
-  deliveryLowOrderFactor: 'delivery.low_order_subsidy_factor',
-  deliveryCapToCart: 'delivery.cap_to_cart_total',
+  showBrandName: 'branding.show_brand_name',
+  lowStockThreshold: 'inventory.low_stock_threshold',
+  orderDelayAlertHours: 'orders.delay_alert_hours',
+  orderHighValueThreshold: 'orders.high_value_threshold',
 };
 
 const FIELD_TYPES = {
@@ -521,17 +508,10 @@ const FIELD_TYPES = {
   brandImageBadge: 'string',
   brandImageShape: 'string',
   brandNameScale: 'number',
-  deliveryBaseFee: 'number',
-  deliveryPerKmFee: 'number',
-  deliveryMinFee: 'number',
-  deliveryFreeAbove: 'number',
-  deliveryRoundingStep: 'number',
-  deliveryDefaultRadius: 'number',
-  deliveryMaxFeeRatio: 'number',
-  deliveryMaxFeeAbsolute: 'number',
-  deliveryLowOrderThreshold: 'number',
-  deliveryLowOrderFactor: 'number',
-  deliveryCapToCart: 'boolean',
+  showBrandName: 'boolean',
+  lowStockThreshold: 'number',
+  orderDelayAlertHours: 'number',
+  orderHighValueThreshold: 'number',
 };
 
 export default function AdminSystemSettings() {
@@ -905,9 +885,12 @@ export default function AdminSystemSettings() {
                 </button>
               </div>
             </section>
-            <section>
-              <h2 className="h5 mb-2">Store identity</h2>
-              <p className="text-muted small mb-3">Shown in the navigation bar, emails and invoices.</p>
+            <AdminCollapsibleSection
+              title="Store identity"
+              description="Shown in the navigation bar, emails and invoices."
+              rememberState
+              persistKey="admin:system-settings:store-identity"
+            >
               <div className="row g-3">
                 <div className="col-12 col-md-6">
                   <label className="form-label" htmlFor="storeName">Store name</label>
@@ -940,6 +923,13 @@ export default function AdminSystemSettings() {
                     </div>
                   </div>
                   <p className="form-text">Controls the navigation brand text size for better alignment with uploaded logos.</p>
+                </div>
+                <div className="col-12 col-md-6">
+                  <div className="form-check mt-md-5 pt-md-1">
+                    <input className="form-check-input" type="checkbox" id="showBrandName" name="showBrandName" checked={!!form.showBrandName} onChange={handleChange} />
+                    <label className="form-check-label" htmlFor="showBrandName">Display brand name next to the logo</label>
+                    <p className="form-text small mb-0">Turn this off to show only the brand image in the storefront navigation.</p>
+                  </div>
                 </div>
                 <div className="col-12">
                   <div className="row g-3">
@@ -1132,11 +1122,14 @@ export default function AdminSystemSettings() {
                   </div>
                 </div>
               </div>
-            </section>
+            </AdminCollapsibleSection>
 
-            <section>
-              <h2 className="h5 mb-2">Currency</h2>
-              <p className="text-muted small mb-3">Controls how amounts are displayed across the app.</p>
+            <AdminCollapsibleSection
+              title="Currency"
+              description="Controls how amounts are displayed across the app."
+              rememberState
+              persistKey="admin:system-settings:currency"
+            >
               <div className="row g-3">
                 <div className="col-12 col-md-4">
                   <label className="form-label" htmlFor="currencyCode">Currency code</label>
@@ -1152,11 +1145,14 @@ export default function AdminSystemSettings() {
                 </div>
               </div>
               <p className="small text-muted mt-2 mb-0">Preview: <strong>{previewCurrency}</strong></p>
-            </section>
+            </AdminCollapsibleSection>
 
-            <section>
-              <h2 className="h5 mb-2">Theme</h2>
-              <p className="text-muted small mb-3">Set the default appearance for new visitors.</p>
+            <AdminCollapsibleSection
+              title="Theme"
+              description="Set the default appearance for new visitors."
+              rememberState
+              persistKey="admin:system-settings:theme"
+            >
               <div className="row g-3 align-items-center">
                 <div className="col-12 col-md-6">
                   <label className="form-label" htmlFor="defaultTheme">Default theme</label>
@@ -1172,96 +1168,69 @@ export default function AdminSystemSettings() {
                   </div>
                 </div>
               </div>
-            </section>
+            </AdminCollapsibleSection>
 
-            <section>
-              <h2 className="h5 mb-2">Delivery pricing</h2>
-              <p className="text-muted small mb-3">Tune how we blend distance, basket value, and caps to keep delivery fees fair and predictable.</p>
+            <AdminCollapsibleSection
+              title="Operational alerts"
+              description="Fine-tune when admins get notified about inventory levels and order activity."
+              rememberState
+              persistKey="admin:system-settings:operational-alerts"
+            >
               <div className="row g-3">
                 <div className="col-12 col-sm-6 col-lg-4">
-                  <label className="form-label" htmlFor="deliveryBaseFee">Base fee</label>
+                  <label className="form-label" htmlFor="lowStockThreshold">Low stock threshold</label>
+                  <input
+                    id="lowStockThreshold"
+                    name="lowStockThreshold"
+                    type="number"
+                    min={0}
+                    step={1}
+                    className="form-control"
+                    value={form.lowStockThreshold ?? ''}
+                    onChange={handleChange}
+                    required
+                  />
+                  <p className="form-text small">We alert when product inventory drops to or below this quantity.</p>
+                </div>
+                <div className="col-12 col-sm-6 col-lg-4">
+                  <label className="form-label" htmlFor="orderDelayAlertHours">Order delay alert</label>
+                  <div className="input-group">
+                    <input
+                      id="orderDelayAlertHours"
+                      name="orderDelayAlertHours"
+                      type="number"
+                      min={1}
+                      step={1}
+                      className="form-control"
+                      value={form.orderDelayAlertHours ?? ''}
+                      onChange={handleChange}
+                      required
+                    />
+                    <span className="input-group-text">hours</span>
+                  </div>
+                  <p className="form-text small">Orders older than this without fulfilment will raise a delay alert.</p>
+                </div>
+                <div className="col-12 col-sm-6 col-lg-4">
+                  <label className="form-label" htmlFor="orderHighValueThreshold">High value alert</label>
                   <div className="input-group">
                     <span className="input-group-text">{form.currencySymbol || form.currencyCode}</span>
-                    <input id="deliveryBaseFee" name="deliveryBaseFee" type="number" min={0} step={5} className="form-control" value={form.deliveryBaseFee ?? ''} onChange={handleChange} required />
+                    <input
+                      id="orderHighValueThreshold"
+                      name="orderHighValueThreshold"
+                      type="number"
+                      min={0}
+                      step={100}
+                      className="form-control"
+                      value={form.orderHighValueThreshold ?? ''}
+                      onChange={handleChange}
+                      required
+                    />
                   </div>
-                  <p className="form-text small">Starting charge before distance and subsidies.</p>
-                </div>
-                <div className="col-12 col-sm-6 col-lg-4">
-                  <label className="form-label" htmlFor="deliveryPerKmFee">Per km fee</label>
-                  <div className="input-group">
-                    <span className="input-group-text">{form.currencySymbol || form.currencyCode}</span>
-                    <input id="deliveryPerKmFee" name="deliveryPerKmFee" type="number" min={0} step={1} className="form-control" value={form.deliveryPerKmFee ?? ''} onChange={handleChange} required />
-                    <span className="input-group-text">/km</span>
-                  </div>
-                  <p className="form-text small">Multiplier applied to the straight-line distance.</p>
-                </div>
-                <div className="col-12 col-sm-6 col-lg-4">
-                  <label className="form-label" htmlFor="deliveryMinFee">Minimum fee</label>
-                  <div className="input-group">
-                    <span className="input-group-text">{form.currencySymbol || form.currencyCode}</span>
-                    <input id="deliveryMinFee" name="deliveryMinFee" type="number" min={0} step={5} className="form-control" value={form.deliveryMinFee ?? ''} onChange={handleChange} required />
-                  </div>
-                  <p className="form-text small">We never charge less than this unless a cap is lower.</p>
-                </div>
-                <div className="col-12 col-sm-6 col-lg-4">
-                  <label className="form-label" htmlFor="deliveryFreeAbove">Free above</label>
-                  <div className="input-group">
-                    <span className="input-group-text">{form.currencySymbol || form.currencyCode}</span>
-                    <input id="deliveryFreeAbove" name="deliveryFreeAbove" type="number" min={0} step={50} className="form-control" value={form.deliveryFreeAbove ?? ''} onChange={handleChange} />
-                  </div>
-                  <p className="form-text small">Basket total that unlocks free delivery. Leave 0 to disable.</p>
-                </div>
-                <div className="col-12 col-sm-6 col-lg-4">
-                  <label className="form-label" htmlFor="deliveryRoundingStep">Rounding step</label>
-                  <input id="deliveryRoundingStep" name="deliveryRoundingStep" type="number" min={1} step={1} className="form-control" value={form.deliveryRoundingStep ?? ''} onChange={handleChange} required />
-                  <p className="form-text small">Fees are rounded up to this increment.</p>
-                </div>
-                <div className="col-12 col-sm-6 col-lg-4">
-                  <label className="form-label" htmlFor="deliveryDefaultRadius">Default service radius (km)</label>
-                  <input id="deliveryDefaultRadius" name="deliveryDefaultRadius" type="number" min={0} step={1} className="form-control" value={form.deliveryDefaultRadius ?? ''} onChange={handleChange} required />
-                  <p className="form-text small">Used when a shop does not define its own radius.</p>
-                </div>
-                <div className="col-12 col-sm-6 col-lg-4">
-                  <label className="form-label" htmlFor="deliveryMaxFeeRatio">Max fee as % of cart</label>
-                  <div className="input-group">
-                    <input id="deliveryMaxFeeRatio" name="deliveryMaxFeeRatio" type="number" min={0} max={1} step={0.05} className="form-control" value={form.deliveryMaxFeeRatio ?? ''} onChange={handleChange} />
-                    <span className="input-group-text">× cart total</span>
-                  </div>
-                  <p className="form-text small">Keeps delivery below a percentage of the basket (e.g. 0.6 = 60%).</p>
-                </div>
-                <div className="col-12 col-sm-6 col-lg-4">
-                  <label className="form-label" htmlFor="deliveryMaxFeeAbsolute">Hard fee ceiling</label>
-                  <div className="input-group">
-                    <span className="input-group-text">{form.currencySymbol || form.currencyCode}</span>
-                    <input id="deliveryMaxFeeAbsolute" name="deliveryMaxFeeAbsolute" type="number" min={0} step={10} className="form-control" value={form.deliveryMaxFeeAbsolute ?? ''} onChange={handleChange} />
-                  </div>
-                  <p className="form-text small">Absolute cap regardless of distance. Leave 0 to disable.</p>
-                </div>
-                <div className="col-12 col-sm-6 col-lg-4">
-                  <label className="form-label" htmlFor="deliveryLowOrderThreshold">Basket subsidy threshold</label>
-                  <div className="input-group">
-                    <span className="input-group-text">{form.currencySymbol || form.currencyCode}</span>
-                    <input id="deliveryLowOrderThreshold" name="deliveryLowOrderThreshold" type="number" min={0} step={50} className="form-control" value={form.deliveryLowOrderThreshold ?? ''} onChange={handleChange} />
-                  </div>
-                  <p className="form-text small">Orders below this total receive a proportional discount.</p>
-                </div>
-                <div className="col-12 col-sm-6 col-lg-4">
-                  <label className="form-label" htmlFor="deliveryLowOrderFactor">Subsidy floor</label>
-                  <div className="input-group">
-                    <input id="deliveryLowOrderFactor" name="deliveryLowOrderFactor" type="number" min={0.1} max={1} step={0.05} className="form-control" value={form.deliveryLowOrderFactor ?? ''} onChange={handleChange} />
-                    <span className="input-group-text">× base</span>
-                  </div>
-                  <p className="form-text small">Lowest multiplier applied to the distance cost when the basket is empty.</p>
-                </div>
-                <div className="col-12 col-lg-4">
-                  <div className="form-check mt-4 pt-2">
-                    <input className="form-check-input" type="checkbox" id="deliveryCapToCart" name="deliveryCapToCart" checked={!!form.deliveryCapToCart} onChange={handleChange} />
-                    <label className="form-check-label" htmlFor="deliveryCapToCart">Never charge more than the order total</label>
-                    <p className="form-text small mb-0">When enabled we clamp delivery fees to the basket value after other caps.</p>
-                  </div>
+                  <p className="form-text small">Trigger a notification when an order total meets or exceeds this amount.</p>
                 </div>
               </div>
-            </section>
+            </AdminCollapsibleSection>
+
           </fieldset>
           <div className="d-flex justify-content-end gap-2">
             <button type="reset" className="btn btn-outline-secondary" onClick={() => setForm(DEFAULT_FORM)} disabled={loading || saving}>Reset</button>
@@ -1341,6 +1310,9 @@ function applySettingsToForm(settings) {
     map.brandNameScale = DEFAULT_FORM.brandNameScale;
   } else {
     map.brandNameScale = Math.min(Math.max(map.brandNameScale, 0.6), 1.8);
+  }
+  if (typeof map.showBrandName !== 'boolean') {
+    map.showBrandName = DEFAULT_FORM.showBrandName;
   }
   return map;
 }

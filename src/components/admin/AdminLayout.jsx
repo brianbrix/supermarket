@@ -10,7 +10,9 @@ export default function AdminLayout() {
       title: 'Main',
       links: [
         { to: '/admin/dashboard', icon: 'bi-speedometer2', label: 'Dashboard' },
+        { to: '/admin/notifications', icon: 'bi-bell', label: 'Notifications' },
         { to: '/admin/homepage', icon: 'bi-columns-gap', label: 'Homepage' },
+        { to: '/admin/about', icon: 'bi-people-heart', label: 'About Page' },
       ]
     },
     {
@@ -18,6 +20,7 @@ export default function AdminLayout() {
       title: 'Catalog',
       links: [
         { to: '/admin/products', icon: 'bi-box-seam', label: 'Products' },
+        { to: '/admin/product-layouts', icon: 'bi-grid-3x3-gap', label: 'Product Layouts' },
         { to: '/admin/brands', icon: 'bi-patch-check', label: 'Brands' },
         { to: '/admin/categories', icon: 'bi-tags', label: 'Categories' },
         { to: '/admin/product-tags', icon: 'bi-bookmark-star', label: 'Product Tags' },
@@ -47,13 +50,14 @@ export default function AdminLayout() {
       links: [
         { to: '/admin/users', icon: 'bi-people', label: 'Users' },
         { to: '/admin/analytics', icon: 'bi-graph-up', label: 'Analytics' },
+        { to: '/admin/delivery-settings', icon: 'bi-truck', label: 'Delivery Settings' },
         { to: '/admin/system-settings', icon: 'bi-gear-fill', label: 'System Settings' },
       ]
     }
   ];
 
   return (
-    <div className="admin-layout d-flex" style={{minHeight:'calc(100vh - 56px)'}}>
+    <div className="admin-layout d-flex align-items-start gap-3" style={{minHeight:'calc(100vh - 56px)'}}>
       <aside className={`admin-sidebar border-end bg-body-tertiary p-2 d-flex flex-column ${collapsed ? 'is-collapsed' : ''}`}>
         <button type="button" className="btn btn-sm btn-outline-secondary mb-3" onClick={()=>setCollapsed(c=>!c)} aria-label={collapsed? 'Expand sidebar':'Collapse sidebar'}>
           <i className={`bi ${collapsed? 'bi-chevron-double-right':'bi-chevron-double-left'}`}></i>
@@ -95,7 +99,11 @@ function AdminNavGroup({ group, collapsed }) {
   }, []);
 
   useEffect(() => {
-    try { window.localStorage.setItem(storageKey, open ? '1' : '0'); } catch {}
+    try {
+      window.localStorage.setItem(storageKey, open ? '1' : '0');
+    } catch {
+      // localStorage persistence can fail in private mode; ignore errors
+    }
   }, [open, storageKey]);
 
   useLayoutEffect(() => {

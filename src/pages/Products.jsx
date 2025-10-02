@@ -4,9 +4,20 @@ import { api, mapProductResponse } from '../services/api.js';
 import { BRAND_NAME } from '../config/brand.js';
 import { useSettings } from '../context/SettingsContext.jsx';
 import ProductCard from '../components/ProductCard.jsx';
+import CatalogPromoBanner from '../components/CatalogPromoBanner.jsx';
 import { useDebounce } from '../hooks/useDebounce.js';
 import PaginationBar from '../components/PaginationBar.jsx';
 import { Typeahead } from 'react-bootstrap-typeahead';
+import {
+  DEFAULT_FILTER_STYLE,
+  normalizeFilterStyle,
+  DEFAULT_PROMO_VARIANT,
+  DEFAULT_PROMO_FREQUENCY,
+  DEFAULT_PROMO_CONTENT,
+  normalizePromoVariant,
+  normalizePromoFrequency,
+  normalizePromoContent,
+} from '../data/catalogPresentation.js';
 
 const toSlug = (value) => {
   if (value == null) return '';
@@ -201,6 +212,9 @@ const normalizeBrandOptions = (list) => {
   return options;
 };
 
+const CATALOG_LAYOUTS = new Set(['grid-classic', 'grid-comfort', 'grid-cards', 'list-media', 'list-dense']);
+const DEFAULT_CATALOG_LAYOUT = 'grid-classic';
+
 export default function Products() {
   const location = useLocation();
   const navigate = useNavigate();
@@ -244,6 +258,51 @@ export default function Products() {
     }
   }
   const { settings } = useSettings();
+  const productLayout = useMemo(() => {
+    const raw = settings?.catalog?.productLayout;
+    if (typeof raw !== 'string') return DEFAULT_CATALOG_LAYOUT;
+    const normalized = raw.trim().toLowerCase();
+    return CATALOG_LAYOUTS.has(normalized) ? normalized : DEFAULT_CATALOG_LAYOUT;
+  }, [settings?.catalog?.productLayout]);
+  const layoutConfig = useMemo(() => {
+    switch (productLayout) {
+      case 'grid-comfort':
+        return { compact: false };
+      case 'grid-cards':
+        return { compact: false };
+      case 'list-media':
+        return { compact: false };
+      case 'list-dense':
+        return { compact: true };
+      case 'grid-classic':
+      default:
+        return { compact: false };
+    }
+  }, [productLayout]);
+  const filterStyle = useMemo(
+    () => normalizeFilterStyle(settings?.catalog?.filterStyle ?? DEFAULT_FILTER_STYLE),
+    [settings?.catalog?.filterStyle]
+  );
+  const brandRequiresCategory = settings?.catalog?.filterBehavior?.requireCategoryForBrands ?? false;
+  const promoConfig = useMemo(() => {
+    const topRaw = settings?.catalog?.promoBanners?.top ?? DEFAULT_PROMO_VARIANT;
+    const inlineRaw = settings?.catalog?.promoBanners?.inline ?? DEFAULT_PROMO_VARIANT;
+    const topVariant = normalizePromoVariant(typeof topRaw === 'string' ? topRaw : topRaw?.variant ?? DEFAULT_PROMO_VARIANT);
+    const inlineVariant = normalizePromoVariant(typeof inlineRaw === 'string' ? inlineRaw : inlineRaw?.variant ?? DEFAULT_PROMO_VARIANT);
+    const topContent = normalizePromoContent(typeof topRaw === 'object' ? topRaw.content ?? topRaw : DEFAULT_PROMO_CONTENT);
+    const inlineContent = normalizePromoContent(typeof inlineRaw === 'object' ? inlineRaw.content ?? inlineRaw : DEFAULT_PROMO_CONTENT);
+    const inlineFrequency = normalizePromoFrequency(
+      typeof inlineRaw === 'object' ? inlineRaw.frequency ?? settings?.catalog?.promoBanners?.inlineFrequency : settings?.catalog?.promoBanners?.inlineFrequency
+    );
+    return {
+      top: { variant: topVariant, content: topContent },
+      inline: { variant: inlineVariant, content: inlineContent, frequency: inlineFrequency },
+    };
+  }, [
+    settings?.catalog?.promoBanners?.top,
+    settings?.catalog?.promoBanners?.inline,
+    settings?.catalog?.promoBanners?.inlineFrequency,
+  ]);
   const storeName = settings?.storeName || BRAND_NAME;
   const [sectionFilters, setSectionFilters] = useState(initialParsed);
   const staticFiltersKey = useMemo(
@@ -261,6 +320,26 @@ export default function Products() {
   const [categories, setCategories] = useState([]);
   const categoriesRef = useRef([]);
   const [results, setResults] = useState([]);
+  const decoratedResults = useMemo(() => {
+    if (!Array.isArray(results) || results.length === 0) {
+      return [];
+    }
+    const inlineVariant = promoConfig.inline.variant;
+    const inlineContent = promoConfig.inline.content;
+    const frequency = promoConfig.inline.frequency || DEFAULT_PROMO_FREQUENCY;
+    const shouldInject = inlineVariant !== 'none' && frequency > 0;
+    if (!shouldInject) {
+      return results.map(product => ({ type: 'product', key: `product-${product.id}`, product }));
+    }
+    const items = [];
+    results.forEach((product, index) => {
+      if (index > 0 && index % frequency === 0) {
+        items.push({ type: 'promo', key: `promo-${index}`, variant: inlineVariant, content: inlineContent });
+      }
+      items.push({ type: 'product', key: `product-${product.id}`, product });
+    });
+    return items;
+  }, [results, promoConfig.inline]);
   const [pageMeta, setPageMeta] = useState({ page:0, size:100, totalElements:0, totalPages:0, first:true, last:true });
   const [page, setPage] = useState(0);
   const size = 20;
@@ -316,7 +395,7 @@ export default function Products() {
     } else {
       const match = list.find(cat => String(cat.id) === normalizedValue);
       if (!match) return;
- 
+      const slug = match.slug ?? toSlug(match.name);
       if (!slug) return;
       params.set('category', slug);
       params.set('categoryId', normalizedValue);
@@ -944,18 +1023,146 @@ export default function Products() {
     return brandIds.map(id => optionMap.get(String(id))).filter(Boolean);
   }, [brandIds, brandOptions]);
 
-  const brandSelectDisabled = brandLoading || (categoryId !== 'all' && !brandLoading && brandOptions.length === 0);
-  const brandPlaceholder = categoryId === 'all'
-    ? 'Filter by brand (optional)'
-    : brandOptions.length > 0
-      ? 'Brands for selected category'
-      : 'No brands available yet';
+  useEffect(() => {
+    if (!brandRequiresCategory) return;
+    if (categoryId === 'all' && brandIds.length > 0) {
+      setBrandSelection([], { brandSnapshot: brandOptions, fromUrl: false });
+    }
+  }, [brandRequiresCategory, categoryId, brandIds.length, brandOptions, setBrandSelection]);
+
+  const brandSelectDisabled = brandLoading
+    || (brandRequiresCategory && categoryId === 'all')
+    || (categoryId !== 'all' && !brandLoading && brandOptions.length === 0);
+  const brandPlaceholder = (() => {
+    if (brandRequiresCategory && categoryId === 'all') {
+      return 'Choose a category to unlock brand filters';
+    }
+    if (categoryId === 'all') {
+      return 'Filter by brand (optional)';
+    }
+    if (brandOptions.length > 0) {
+      return 'Brands for selected category';
+    }
+    return 'No brands available yet';
+  })();
   const brandHelperMessage = (() => {
     if (brandLoading) return 'Loading brands…';
+    if (brandRequiresCategory && categoryId === 'all') return 'Select a category to browse brands.';
     if (categoryId !== 'all' && brandOptions.length === 0) return 'No brands linked to this category yet.';
     if (categoryId === 'all' && brandOptions.length === 0) return 'No brands available yet.';
     return '';
   })();
+
+  const isSidebarFilter = filterStyle === 'sidebar';
+
+  const filtersMarkup = (
+    <div className={`product-filter-shell product-filter-shell--${filterStyle}`}>
+      <div className={`product-filter-toolbar product-filter-toolbar--${filterStyle} mb-2 d-flex align-items-center gap-2 flex-wrap`}>
+        <h2 className="h6 m-0">Filter Products</h2>
+        <button type="button" className="btn btn-sm btn-outline-secondary d-flex align-items-center gap-1" onClick={()=>setShowFilters(s=>!s)} aria-expanded={showFilters} aria-controls="filtersPanel">
+          <i className={`bi ${showFilters ? 'bi-chevron-up' : 'bi-chevron-down'}`}></i>
+          <span className="d-sm-none">{showFilters ? 'Hide' : 'Show'}</span>
+          <span className="d-none d-sm-inline">{showFilters ? 'Hide Filters' : 'Show Filters'}</span>
+          {activeFilterCount > 0 && <span className="badge text-bg-success ms-1">{activeFilterCount}</span>}
+        </button>
+        <button type="button" className="btn btn-link p-0 small" onClick={resetFilters}>Reset</button>
+      </div>
+      {showFilters && (
+        <form
+          id="filtersPanel"
+          className={`row g-3 ${isSidebarFilter ? 'mb-3' : 'mb-4'} product-filter-form product-filter-form--${filterStyle}`}
+          onSubmit={e=>e.preventDefault()}
+          aria-label="Product filters"
+        >
+          <div className={`col-12 ${isSidebarFilter ? '' : 'col-md-6 col-lg-3'}`}>
+            <label className="form-label small text-muted" htmlFor="filterSearch">Search</label>
+            <input id="filterSearch" type="search" className="form-control" placeholder="e.g. unga" value={query} onChange={e=>setQuery(e.target.value)} />
+          </div>
+          <div className={`col-12 ${isSidebarFilter ? '' : 'col-md-6 col-lg-3'}`}>
+            <label className="form-label small text-muted" htmlFor="filterBrand">Brands</label>
+            <Typeahead
+              id="filterBrand"
+              multiple
+              labelKey="name"
+              options={brandOptions}
+              selected={selectedBrandOptions}
+              onChange={(selected) => {
+                const ids = selected.map(option => String(option.id));
+                const names = selected.map(option => option.name).filter(Boolean);
+                const slugs = selected.map(option => option.slug ?? toSlug(option.name)).filter(Boolean);
+                setBrandSelection(ids, { brandSnapshot: brandOptions, brandNames: names, brandSlugs: slugs });
+              }}
+              placeholder={brandPlaceholder}
+              disabled={brandSelectDisabled}
+              isLoading={brandLoading}
+              clearButton
+              renderMenuItemChildren={(option) => (
+                <div className="d-flex flex-column">
+                  <span>{option.name}</span>
+                  {option.slug && <small className="text-muted">{option.slug}</small>}
+                </div>
+              )}
+              menuProps={{ 'aria-label': 'Brand options' }}
+            />
+            {brandHelperMessage && <small className="form-text text-muted">{brandHelperMessage}</small>}
+          </div>
+          <div className={`col-6 ${isSidebarFilter ? '' : 'col-md-3 col-lg-2'}`}>
+            <label className="form-label small text-muted" htmlFor="filterCategory">Category</label>
+            <select id="filterCategory" className="form-select" value={categoryId} onChange={handleCategorySelect}>
+              <option value="all">All</option>
+              {categories.map(c => <option key={c.id} value={c.id}>{c.label}</option>)}
+            </select>
+          </div>
+          <div className={`col-12 ${isSidebarFilter ? '' : 'col-md-6 col-lg-4'}`}>
+            <label className="form-label small text-muted d-block" htmlFor="priceMinInput">Price Range</label>
+            <div className="d-flex gap-2 align-items-start">
+              <div className="flex-grow-1">
+                <input
+                  id="priceMinInput"
+                  type="number"
+                  className="form-control form-control-sm"
+                  min={sliderBounds.min}
+                  max={priceRange.max}
+                  value={priceRange.min}
+                  onChange={e=>handlePriceChange({ min: Number(e.target.value), max: priceRange.max })}
+                  aria-label="Minimum price"
+                  placeholder="Min"
+                />
+              </div>
+              <span className="small mt-1">–</span>
+              <div className="flex-grow-1">
+                <input
+                  id="priceMaxInput"
+                  type="number"
+                  className="form-control form-control-sm"
+                  min={priceRange.min}
+                  max={sliderBounds.max}
+                  value={priceRange.max}
+                  onChange={e=>handlePriceChange({ min: priceRange.min, max: Number(e.target.value) })}
+                  aria-label="Maximum price"
+                  placeholder="Max"
+                />
+              </div>
+            </div>
+          </div>
+          <div className={`col-6 ${isSidebarFilter ? '' : 'col-md-3 col-lg-1'}`}>
+            <label className="form-label small text-muted d-block" htmlFor="inStockToggle">In stock only</label>
+            <div className="form-check m-0">
+              <input className="form-check-input" type="checkbox" id="inStockToggle" checked={inStockOnly} onChange={e=>setInStockOnly(e.target.checked)} />
+            </div>
+          </div>
+          <div className={`col-6 d-grid align-content-end ${isSidebarFilter ? '' : 'col-md-3 col-lg-1'}`}>
+            <label className="form-label small text-muted visually-hidden" htmlFor="clearFiltersButton">Clear filters</label>
+            <button id="clearFiltersButton" type="button" onClick={resetFilters} className="btn btn-outline-secondary btn-sm">Clear</button>
+          </div>
+        </form>
+      )}
+    </div>
+  );
+
+  const topBannerNode = promoConfig.top.variant !== 'none'
+    ? <CatalogPromoBanner variant={promoConfig.top.variant} content={promoConfig.top.content} placement="top" className="mb-3" />
+    : null;
 
   return (
     <section className="container-fluid py-3 px-3 px-sm-4">
@@ -969,136 +1176,109 @@ export default function Products() {
           )}
         </div>
       </div>
-      <div className="mb-2 d-flex align-items-center gap-2 flex-wrap">
-        <h2 className="h6 m-0">Filter Products</h2>
-        <button type="button" className="btn btn-sm btn-outline-secondary d-flex align-items-center gap-1" onClick={()=>setShowFilters(s=>!s)} aria-expanded={showFilters} aria-controls="filtersPanel">
-          <i className={`bi ${showFilters ? 'bi-chevron-up' : 'bi-chevron-down'}`}></i>
-          <span className="d-sm-none">{showFilters ? 'Hide' : 'Show'}</span>
-          <span className="d-none d-sm-inline">{showFilters ? 'Hide Filters' : 'Show Filters'}</span>
-          {activeFilterCount > 0 && <span className="badge text-bg-success ms-1">{activeFilterCount}</span>}
-        </button>
-        <button type="button" className="btn btn-link p-0 small" onClick={resetFilters}>Reset</button>
-      </div>
-      {showFilters && (
-      <form id="filtersPanel" className="row g-3 mb-4" onSubmit={e=>e.preventDefault()} aria-label="Product filters">
-        <div className="col-12 col-md-6 col-lg-3">
-          <label className="form-label small text-muted" htmlFor="filterSearch">Search</label>
-          <input id="filterSearch" type="search" className="form-control" placeholder="e.g. unga" value={query} onChange={e=>setQuery(e.target.value)} />
-        </div>
-        <div className="col-12 col-md-6 col-lg-3">
-          <label className="form-label small text-muted" htmlFor="filterBrand">Brands</label>
-          <Typeahead
-            id="filterBrand"
-            multiple
-            labelKey="name"
-            options={brandOptions}
-            selected={selectedBrandOptions}
-            onChange={(selected) => {
-              const ids = selected.map(option => String(option.id));
-              const names = selected.map(option => option.name).filter(Boolean);
-              const slugs = selected.map(option => option.slug ?? toSlug(option.name)).filter(Boolean);
-              setBrandSelection(ids, { brandSnapshot: brandOptions, brandNames: names, brandSlugs: slugs });
-            }}
-            placeholder={brandPlaceholder}
-            disabled={brandSelectDisabled}
-            isLoading={brandLoading}
-            clearButton
-            renderMenuItemChildren={(option) => (
-              <div className="d-flex flex-column">
-                <span>{option.name}</span>
-                {option.slug && <small className="text-muted">{option.slug}</small>}
+      {filterStyle === 'sidebar' ? (
+        <div className="product-sidebar-layout row gx-4 gy-4">
+          <aside className="product-sidebar-layout__filters col-12 col-lg-3">
+            {filtersMarkup}
+          </aside>
+          <div className="product-sidebar-layout__results col-12 col-lg-9">
+            {topBannerNode}
+            {error && <div className="alert alert-danger" role="alert">{error}</div>}
+            {loading ? (
+              <div className="row g-3">
+                {Array.from({length:8}).map((_,i)=>(
+                  <div key={i} className="col-6 col-md-4">
+                    <div className="card h-100 p-3">
+                      <div className="placeholder-glow mb-2 text-center" style={{fontSize:'2.5rem'}}>
+                        <span className="placeholder col-6" style={{height:'2.5rem'}}></span>
+                      </div>
+                      <p className="placeholder-glow mb-2">
+                        <span className="placeholder col-8"></span>
+                      </p>
+                      <p className="placeholder-glow mb-2 small">
+                        <span className="placeholder col-10"></span>
+                        <span className="placeholder col-7"></span>
+                      </p>
+                      <div className="mt-auto placeholder-glow">
+                        <span className="placeholder col-5"></span>
+                      </div>
+                    </div>
+                  </div>
+                ))}
+              </div>
+            ) : results.length === 0 ? (
+              <p className="text-muted">No products match your search.</p>
+            ) : (
+              <div className={`product-results product-results--${productLayout}`} data-layout={productLayout}>
+                {decoratedResults.map(item => {
+                  if (item.type === 'promo') {
+                    return (
+                      <div key={item.key} className="product-results__promo">
+                        <CatalogPromoBanner variant={item.variant} content={item.content} placement="inline" />
+                      </div>
+                    );
+                  }
+                  return (
+                    <div key={item.key} className="product-results__item">
+                      <ProductCard product={item.product} compact={layoutConfig.compact} layout={productLayout} />
+                    </div>
+                  );
+                })}
               </div>
             )}
-            menuProps={{ 'aria-label': 'Brand options' }}
-          />
-          {brandHelperMessage && <small className="form-text text-muted">{brandHelperMessage}</small>}
-        </div>
-        <div className="col-6 col-md-3 col-lg-2">
-          <label className="form-label small text-muted" htmlFor="filterCategory">Category</label>
-          <select id="filterCategory" className="form-select" value={categoryId} onChange={handleCategorySelect}>
-            <option value="all">All</option>
-            {categories.map(c => <option key={c.id} value={c.id}>{c.label}</option>)}
-          </select>
-        </div>
-        <div className="col-12 col-md-6 col-lg-4">
-          <label className="form-label small text-muted d-block" htmlFor="priceMinInput">Price Range</label>
-          <div className="d-flex gap-2 align-items-start">
-            <div className="flex-grow-1">
-              <input
-                id="priceMinInput"
-                type="number"
-                className="form-control form-control-sm"
-                min={sliderBounds.min}
-                max={priceRange.max}
-                value={priceRange.min}
-                onChange={e=>handlePriceChange({ min: Number(e.target.value), max: priceRange.max })}
-                aria-label="Minimum price"
-                placeholder="Min"
-              />
-            </div>
-            <span className="small mt-1">–</span>
-            <div className="flex-grow-1">
-              <input
-                id="priceMaxInput"
-                type="number"
-                className="form-control form-control-sm"
-                min={priceRange.min}
-                max={sliderBounds.max}
-                value={priceRange.max}
-                onChange={e=>handlePriceChange({ min: priceRange.min, max: Number(e.target.value) })}
-                aria-label="Maximum price"
-                placeholder="Max"
-              />
-            </div>
+            <PaginationBar {...pageMeta} onPageChange={setPage} />
           </div>
         </div>
-        <div className="col-6 col-md-3 col-lg-2">
-          <label className="form-label small text-muted d-block" htmlFor="inStockToggle">In stock only</label>
-          <div className="form-check m-0">
-            <input className="form-check-input" type="checkbox" id="inStockToggle" checked={inStockOnly} onChange={e=>setInStockOnly(e.target.checked)} />
-          </div>
-        </div>
-        <div className="col-6 col-md-3 col-lg-1 d-grid align-content-end">
-          <label className="form-label small text-muted visually-hidden" htmlFor="clearFiltersButton">Clear filters</label>
-          <button id="clearFiltersButton" type="button" onClick={resetFilters} className="btn btn-outline-secondary btn-sm">Clear</button>
-        </div>
-      </form>
-      )}
-      {error && <div className="alert alert-danger" role="alert">{error}</div>}
-      {loading ? (
-        <div className="row g-3">
-          {Array.from({length:8}).map((_,i)=>(
-            <div key={i} className="col-6 col-md-4 col-lg-3">
-              <div className="card h-100 p-3">
-                <div className="placeholder-glow mb-2 text-center" style={{fontSize:'2.5rem'}}>
-                  <span className="placeholder col-6" style={{height:'2.5rem'}}></span>
-                </div>
-                <p className="placeholder-glow mb-2">
-                  <span className="placeholder col-8"></span>
-                </p>
-                <p className="placeholder-glow mb-2 small">
-                  <span className="placeholder col-10"></span>
-                  <span className="placeholder col-7"></span>
-                </p>
-                <div className="mt-auto placeholder-glow">
-                  <span className="placeholder col-5"></span>
-                </div>
-              </div>
-            </div>
-          ))}
-        </div>
-      ) : results.length === 0 ? (
-        <p className="text-muted">No products match your search.</p>
       ) : (
-        <div className="row g-3">
-          {results.map(p => (
-            <div key={p.id} className="col-6 col-md-4 col-lg-3">
-              <ProductCard product={p} />
+        <>
+          {topBannerNode}
+          {filtersMarkup}
+          {error && <div className="alert alert-danger" role="alert">{error}</div>}
+          {loading ? (
+            <div className="row g-3">
+              {Array.from({length:8}).map((_,i)=>(
+                <div key={i} className="col-6 col-md-4 col-lg-3">
+                  <div className="card h-100 p-3">
+                    <div className="placeholder-glow mb-2 text-center" style={{fontSize:'2.5rem'}}>
+                      <span className="placeholder col-6" style={{height:'2.5rem'}}></span>
+                    </div>
+                    <p className="placeholder-glow mb-2">
+                      <span className="placeholder col-8"></span>
+                    </p>
+                    <p className="placeholder-glow mb-2 small">
+                      <span className="placeholder col-10"></span>
+                      <span className="placeholder col-7"></span>
+                    </p>
+                    <div className="mt-auto placeholder-glow">
+                      <span className="placeholder col-5"></span>
+                    </div>
+                  </div>
+                </div>
+              ))}
             </div>
-          ))}
-        </div>
+          ) : results.length === 0 ? (
+            <p className="text-muted">No products match your search.</p>
+          ) : (
+            <div className={`product-results product-results--${productLayout}`} data-layout={productLayout}>
+              {decoratedResults.map(item => {
+                if (item.type === 'promo') {
+                  return (
+                    <div key={item.key} className="product-results__promo">
+                      <CatalogPromoBanner variant={item.variant} content={item.content} placement="inline" />
+                    </div>
+                  );
+                }
+                return (
+                  <div key={item.key} className="product-results__item">
+                    <ProductCard product={item.product} compact={layoutConfig.compact} layout={productLayout} />
+                  </div>
+                );
+              })}
+            </div>
+          )}
+          <PaginationBar {...pageMeta} onPageChange={setPage} />
+        </>
       )}
-      <PaginationBar {...pageMeta} onPageChange={setPage} />
     </section>
   );
 }

@@ -1,5 +1,5 @@
 import { createContext, useContext, useEffect, useMemo, useState } from 'react';
-import { DEFAULT_STORE_THEME, normalizeStoreTheme } from '../config/storeThemes.js';
+import { DEFAULT_STORE_THEME, STORE_THEMES, normalizeStoreTheme } from '../config/storeThemes.js';
 
 const ThemeContext = createContext();
 
@@ -62,13 +62,18 @@ export function ThemeProvider({ children }) {
   }, [themeState.value, themeState.source]);
 
   useEffect(() => {
+    const mode = STORE_THEMES[storeTheme]?.mode || 'light';
     try {
       window.localStorage.setItem('storeTheme', storeTheme);
       window.localStorage.setItem('storeTheme_source', storeThemeSource);
+      window.localStorage.setItem('storeTheme_mode', mode);
     } catch {
       /* ignore */
     }
     document.documentElement.setAttribute('data-store-theme', storeTheme);
+    document.documentElement.setAttribute('data-store-mode', mode);
+    document.body?.setAttribute('data-store-theme', storeTheme);
+    document.body?.setAttribute('data-store-mode', mode);
   }, [storeTheme, storeThemeSource]);
 
   function applyTheme(value, source = 'nav') {

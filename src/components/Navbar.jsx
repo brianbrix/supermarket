@@ -22,6 +22,8 @@ export default function Navbar() {
   const brandImage = (branding.brandImage || '').trim();
   const normalizedShape = (branding.brandImageShape || '').toLowerCase();
   const brandShape = BRAND_SHAPE_SET.has(normalizedShape) ? normalizedShape : DEFAULT_BRAND_SHAPE;
+  const hasBrandAsset = Boolean(brandLogo || brandImage);
+  const showBrandName = branding.showBrandName !== false || !hasBrandAsset;
   const brandNameScaleRaw = Number(branding.brandNameScale ?? 1);
   const brandNameScale = Number.isFinite(brandNameScaleRaw)
     ? Math.min(1.8, Math.max(0.6, brandNameScaleRaw))
@@ -56,9 +58,10 @@ export default function Navbar() {
           className="navbar-brand d-flex align-items-center gap-2 fw-bold text-success fs-3"
           to="/"
           data-brand-scale={brandNameScale.toFixed(2)}
+          data-brand-text-visible={showBrandName}
           style={brandScaleStyle}
         >
-          {(brandLogo || brandImage) ? (
+          {hasBrandAsset ? (
             <span
               className={`navbar-brand-mark d-inline-flex align-items-center justify-content-center brand-asset brand-shape-surface${brandLogo ? '' : ' brand-asset--generated'}`}
               data-brand-shape={brandShape}
@@ -72,7 +75,9 @@ export default function Navbar() {
               />
             </span>
           ) : null}
-          <span className="navbar-brand-text">{brandName}</span>
+          {showBrandName ? (
+            <span className="navbar-brand-text">{brandName}</span>
+          ) : null}
         </Link>
         <button className="navbar-toggler" type="button" aria-controls="mainNavLinks" aria-label="Toggle navigation" aria-expanded={open} onClick={()=>setOpen(o=>!o)}>
           <span className="navbar-toggler-icon"></span>
@@ -93,6 +98,11 @@ export default function Navbar() {
             <li className="nav-item">
               <NavLink className={({isActive})=>`${baseNavLinkClass}${isActive?' active fw-semibold':''}`} to="/orders" onClick={handleNavClick}>
                 <i className="bi bi-receipt-cutoff"></i><span>My Orders</span>
+              </NavLink>
+            </li>
+            <li className="nav-item">
+              <NavLink className={({isActive})=>`${baseNavLinkClass}${isActive?' active fw-semibold':''}`} to="/delivery" onClick={handleNavClick}>
+                <i className="bi bi-truck"></i><span>Delivery</span>
               </NavLink>
             </li>
                <li className="nav-item">

@@ -22,6 +22,7 @@ class DatabaseSeeder extends Seeder
             DeliveryShopSeeder::class,
             HomepageLayoutSeeder::class,
             OrderSeeder::class,
+            AdminNotificationSeeder::class,
         ]);
     }
 }

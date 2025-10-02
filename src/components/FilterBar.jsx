@@ -44,4 +44,13 @@ function Reset({ onClick, disabled }) {
 }
 FilterBar.Reset = Reset;
 
+function Extra({ children, className = '' }) {
+  return (
+    <div className={`col-12 col-md-auto ms-md-auto d-flex justify-content-md-end ${className}`}>
+      {children}
+    </div>
+  );
+}
+FilterBar.Extra = Extra;
+
 export default FilterBar;

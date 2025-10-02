@@ -317,7 +317,11 @@ export default function Home() {
     : (experienceMode === 'dark' ? 'dark' : 'light');
 
   return (
-    <div className={`homepage-page ${sectionThemeMode === 'dark' ? 'bg-dark text-white' : 'bg-body'}`} data-store-theme={experienceKey}>
+    <div
+      className={`homepage-page homepage-page--${sectionThemeMode}`}
+      data-store-theme={experienceKey}
+      data-page-theme={sectionThemeMode}
+    >
       <div className="container-fluid px-0">
         {error && (
           <div className="alert alert-warning mx-3 mx-sm-4 mt-3" role="alert">

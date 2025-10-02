@@ -5,12 +5,14 @@ import { useLocation, useNavigate, Link } from 'react-router-dom';
 import ImageWithFallback from './ImageWithFallback.jsx';
 import RatingStars from './RatingStars.jsx';
 
-export default function ProductCard({ product, compact = false }) {
+export default function ProductCard({ product, compact = false, layout = 'grid-classic' }) {
   const formatCurrency = useCurrencyFormatter();
   const { addItem } = useCart();
   const { push } = useToast();
   const location = useLocation();
   const navigate = useNavigate();
+  const layoutId = String(layout || 'grid-classic').toLowerCase();
+  const isListLayout = layoutId.startsWith('list');
 
   function handleAdd() {
     if (product.stock === 0) {
@@ -28,14 +30,20 @@ export default function ProductCard({ product, compact = false }) {
       navigate('/checkout');
     }
   }
-  const variantClass = compact ? ' product-card--compact' : ' product-card--standard';
+  const isCompact = compact;
+  const variantClass = isCompact ? ' product-card--compact' : ' product-card--standard';
+  const listClass = isListLayout ? ' product-card--list' : '';
   return (
-    <div className={`product-card card h-100 position-relative${variantClass}`} data-card-variant={compact ? 'compact' : 'standard'}>
+    <div
+      className={`product-card card h-100 position-relative${variantClass}${listClass}`}
+      data-card-variant={isCompact ? 'compact' : 'standard'}
+      data-layout={layoutId}
+    >
       {product.stock === 0 && <span className="badge text-bg-danger position-absolute top-0 end-0 m-2">Out</span>}
       {product.stock > 0 && product.stock <= 3 && <span className="badge text-bg-warning position-absolute top-0 end-0 m-2">{product.stock} left</span>}
-      <Link to={`/product/${product.id}`} className="text-decoration-none text-reset">
-        <div className="card-body pb-2">
-          <div className="text-center mb-2" style={{fontSize:'2.5rem'}}>
+      <Link to={`/product/${product.id}`} className="text-decoration-none text-reset product-card__link">
+        <div className="card-body pb-2 product-card__body">
+          <div className="product-card__media text-center mb-2" style={{fontSize:'2.5rem'}}>
             <ImageWithFallback src={product.image} alt={product.name} />
           </div>
           {product.brand && <p className="text-uppercase small mb-1 fw-semibold product-card__brand">{product.brand}</p>}
@@ -48,7 +56,7 @@ export default function ProductCard({ product, compact = false }) {
           <p className="text-muted small mb-2 product-card__description">{product.description}</p>
         </div>
       </Link>
-      <div className={`px-3 pb-3 mt-auto${compact ? ' pt-0' : ''}`}>
+      <div className={`px-3 pb-3 mt-auto product-card__footer${isCompact ? ' pt-0' : ''}`}>
         <p className="fw-semibold mb-2 product-card__price">{formatCurrency(product.price)} <span className="text-secondary small">/{product.unit}</span></p>
         <button onClick={handleAdd} className="btn btn-success w-100 btn-sm" disabled={product.stock === 0}>{compact ? 'Add' : 'Add to cart'}</button>
       </div>

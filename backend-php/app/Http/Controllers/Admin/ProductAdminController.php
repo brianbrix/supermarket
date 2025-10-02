@@ -85,6 +85,7 @@ class ProductAdminController extends Controller
             'description' => ['nullable','string'],
             'price' => ['required','numeric','min:0'],
             'stock' => ['required','integer','min:0'],
+            'low_stock_threshold' => ['nullable','integer','min:0'],
             'unit' => ['nullable','string','max:50'],
             'category_id' => ['nullable','integer','exists:categories,id'],
             'image_url' => ['nullable','string','max:500'],
@@ -111,19 +112,24 @@ class ProductAdminController extends Controller
             'description' => ['sometimes','nullable','string'],
             'price' => ['sometimes','numeric','min:0'],
             'stock' => ['sometimes','integer','min:0'],
+            'low_stock_threshold' => ['sometimes','nullable','integer','min:0'],
             'unit' => ['sometimes','nullable','string','max:50'],
             'category_id' => ['sometimes','nullable','integer','exists:categories,id'],
             'image_url' => ['sometimes','nullable','string','max:500'],
             'active' => ['sometimes','boolean'],
         ]);
         $normalized = $this->normalizeBrandPayload($data, $product);
-        $originalStock = $product->stock;
+    $originalStock = $product->stock;
+    $originalThreshold = $product->low_stock_threshold;
         $product->update($normalized);
         $this->syncProductTags($product, $request);
         $product->load(['category', 'images', 'tags', 'brand']);
         $this->syncBrandCategoryPivot($product);
 
-        if (array_key_exists('stock', $normalized) && $normalized['stock'] !== $originalStock) {
+        if (
+            (array_key_exists('stock', $normalized) && $normalized['stock'] !== $originalStock) ||
+            (array_key_exists('low_stock_threshold', $normalized) && $normalized['low_stock_threshold'] !== $originalThreshold)
+        ) {
             $this->notifications->notifyLowStock($product);
         }
 
@@ -177,6 +183,7 @@ class ProductAdminController extends Controller
             'price' => $product->price,
             'active' => (bool)$product->active,
             'stock' => $product->stock,
+            'lowStockThreshold' => $product->low_stock_threshold,
             'unit' => $product->unit,
             'categoryId' => $product->category_id,
             'categoryName' => optional($product->category)->name,

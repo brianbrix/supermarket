@@ -6,7 +6,7 @@ import FilterBar from '../../components/FilterBar.jsx';
 import PaginationBar from '../../components/PaginationBar.jsx';
 import { useToast } from '../../context/ToastContext.jsx';
 
-const makeEmptyForm = () => ({ name: '', brandId: '', brandName: '', categoryId: '', price: '', description: '', stock: '0', unit: '', tagSlugs: [] });
+const makeEmptyForm = () => ({ name: '', brandId: '', brandName: '', categoryId: '', price: '', description: '', stock: '0', lowStockThreshold: '', unit: '', tagSlugs: [] });
 
 export default function AdminProducts() {
   const [products, setProducts] = useState([]);
@@ -253,6 +253,8 @@ export default function AdminProducts() {
       tagSlugs: Array.isArray(p.tagSlugs)
         ? p.tagSlugs.map(String)
         : (Array.isArray(p.tags) ? p.tags.map(tag => tag?.slug).filter(Boolean).map(String) : [])
+      ,
+      lowStockThreshold: p.lowStockThreshold != null ? String(p.lowStockThreshold) : ''
     });
     clearPendingImages();
   }
@@ -296,6 +298,7 @@ export default function AdminProducts() {
       const categoryId = form.categoryId ? Number(form.categoryId) : null;
       const priceValue = Number(form.price);
       const stockValue = form.stock === '' ? 0 : Number(form.stock);
+  const lowStockValue = form.lowStockThreshold === '' ? null : Number(form.lowStockThreshold);
       const brandIdValue = form.brandId ? Number(form.brandId) : null;
       const brandNameValue = form.brandName ? form.brandName.trim() : '';
       if (!trimmedName) {
@@ -306,6 +309,9 @@ export default function AdminProducts() {
       }
       if (Number.isNaN(stockValue)) {
         throw new Error('Stock must be a valid number.');
+      }
+      if (lowStockValue !== null && (Number.isNaN(lowStockValue) || lowStockValue < 0)) {
+        throw new Error('Low stock threshold must be zero or greater.');
       }
       const payload = {
         name: trimmedName,
@@ -318,6 +324,7 @@ export default function AdminProducts() {
         description: form.description,
         image_url: null,
         stock: stockValue,
+        low_stock_threshold: lowStockValue,
         unit: form.unit ? form.unit.trim() : null,
         tagSlugs: Array.isArray(form.tagSlugs)
           ? form.tagSlugs.map(slug => String(slug).trim()).filter(Boolean)
@@ -472,12 +479,15 @@ export default function AdminProducts() {
               <table className="table table-sm align-middle">
                 <thead>
                   <tr>
-                    <th>Image</th><th>Name</th><th>Brand</th><th>Category</th><th>Price</th><th>Stock</th><th></th>
+                    <th>Image</th><th>Name</th><th>Brand</th><th>Category</th><th>Price</th><th>Stock</th><th>Low limit</th><th></th>
                   </tr>
                 </thead>
                 <tbody>
                   {products.map(p => (
-                    <tr key={p.id} className={`${p.stock === 0 ? 'table-warning' : ''} ${!p.active ? 'table-secondary text-muted' : ''}`.trim()}>
+                    <tr
+                      key={p.id}
+                      className={`${p.stock === 0 ? 'table-danger' : ''} ${p.stock != null && p.stock > 0 && p.lowStockThreshold != null && p.stock <= p.lowStockThreshold ? 'table-warning' : ''} ${!p.active ? 'table-secondary text-muted' : ''}`.trim()}
+                    >
                       <td style={{width:'54px'}}>{p.image ? <img src={p.image} alt={p.name} style={{width:'48px', height:'48px', objectFit:'cover'}}/> : <span className="text-muted small">—</span>}</td>
                       <td>
                         <div className="d-flex align-items-center">
@@ -496,6 +506,7 @@ export default function AdminProducts() {
                       <td>{p.category}</td>
                       <td>{p.price}</td>
                       <td>{p.stock ?? '-'}</td>
+                      <td>{p.lowStockThreshold != null ? p.lowStockThreshold : <span className="text-muted small">Default</span>}</td>
                       <td className="text-end">
                         <button className="btn btn-sm btn-outline-primary me-2" onClick={()=>handleEdit(p)}>Edit</button>
                         {!p.active ? (
@@ -599,6 +610,20 @@ export default function AdminProducts() {
                 <div>
                   <label htmlFor="product-stock" className="form-label">Stock</label>
                   <input id="product-stock" type="number" min="0" name="stock" value={form.stock} onChange={handleChange} className="form-control" placeholder="0" />
+                </div>
+                <div>
+                  <label htmlFor="product-low-stock" className="form-label">Low stock alert (optional)</label>
+                  <input
+                    id="product-low-stock"
+                    type="number"
+                    min="0"
+                    name="lowStockThreshold"
+                    value={form.lowStockThreshold}
+                    onChange={handleChange}
+                    className="form-control"
+                    placeholder="Uses system default"
+                  />
+                  <div className="form-text small">Overrides the global low stock setting for this product. Leave blank to follow the default.</div>
                 </div>
                 {!editingId && (
                   <div className="mt-3 border rounded p-2">

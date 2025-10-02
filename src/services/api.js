@@ -332,6 +332,23 @@ export const api = {
   admin: {
     stats: () => request('/admin/dashboard/stats'),
     recentOrders: (limit=10) => request(`/admin/dashboard/recent-orders?limit=${limit}`),
+    notifications: {
+      list: ({ page = 0, size = 20, unread, type, q, severity } = {}) => {
+        const params = new URLSearchParams();
+        params.set('page', page + 1);
+        params.set('size', size);
+        if (typeof unread === 'boolean') params.set('unread', unread ? 'true' : 'false');
+        if (type) params.set('type', type);
+        if (severity) params.set('severity', severity);
+        if (q) params.set('q', q);
+        return request(`/admin/notifications?${params.toString()}`);
+      },
+      markRead: (id, read = true) => request(`/admin/notifications/${id}`, {
+        method: 'PATCH',
+        body: JSON.stringify({ read }),
+      }),
+      markAllRead: () => request('/admin/notifications/mark-all-read', { method: 'POST' }),
+    },
     analytics: {
       overview: ({ rangeDays = 30, from, to } = {}) => {
         const params = new URLSearchParams();
@@ -431,6 +448,21 @@ export const api = {
         if (sort) params.set('sort', sort);
         if (direction) params.set('direction', direction);
         return request(`/admin/products?${params.toString()}`);
+      },
+      ratings: {
+        list: (productId, { page = 0, size = 20, rating, onlyFlagged = false } = {}) => {
+          const params = new URLSearchParams();
+          params.set('page', page);
+          params.set('size', size);
+          if (rating != null && rating !== '') params.set('rating', rating);
+          if (onlyFlagged) params.set('onlyFlagged', 'true');
+          return request(`/admin/products/${productId}/ratings?${params.toString()}`);
+        },
+        update: (ratingId, payload) => request(`/admin/products/ratings/${ratingId}`, {
+          method: 'PATCH',
+          body: JSON.stringify(payload),
+        }),
+        delete: (ratingId) => request(`/admin/products/ratings/${ratingId}`, { method: 'DELETE' }),
       }
     },
     brands: {
@@ -676,6 +708,7 @@ export function mapProductResponse(raw) {
     imageObjects: imageMeta.map(im => ({ ...im, absoluteUrl: toAbsoluteAssetUrl(im.url) })), // expose metadata + absolute
     description: p.description || '',
     stock: p.stock != null ? p.stock : undefined,
+    lowStockThreshold: p.lowStockThreshold ?? p.low_stock_threshold ?? null,
     categoryId: p.categoryId,
     ratingAverage,
     ratingCount,

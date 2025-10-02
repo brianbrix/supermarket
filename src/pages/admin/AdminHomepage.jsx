@@ -4,6 +4,7 @@ import PaginationBar from '../../components/PaginationBar.jsx';
 import { api } from '../../services/api.js';
 import { useToast } from '../../context/ToastContext.jsx';
 import SectionRenderer, { clamp } from '../../components/homepage/SectionRenderer.jsx';
+import AdminCollapsibleSection from '../../components/admin/AdminCollapsibleSection.jsx';
 import { STORE_THEMES, STORE_THEME_KEYS, DEFAULT_STORE_THEME, normalizeStoreTheme } from '../../config/storeThemes.js';
 
 const defaultPageMeta = {
@@ -948,6 +949,9 @@ export default function AdminHomepage() {
                           experienceTheme={experienceKey}
                           tagOptions={tagOptions}
                           categoryOptions={categoryOptions}
+                          defaultOpen={idx < 2}
+                          rememberState
+                          persistKey={`admin:homepage:${draft.id || 'draft'}:${section.id || `${section.type}-${idx}`}`}
                         />
                       );
                     })}
@@ -962,7 +966,7 @@ export default function AdminHomepage() {
   );
 }
 
-function SectionEditor({ section, index, total, onChange, onMove, onRemove, storeName, themeMode = 'light', experienceTheme = DEFAULT_STORE_THEME, tagOptions = [], categoryOptions = [] }) {
+function SectionEditor({ section, index, total, onChange, onMove, onRemove, storeName, themeMode = 'light', experienceTheme = DEFAULT_STORE_THEME, tagOptions = [], categoryOptions = [], defaultOpen = true, rememberState = false, persistKey }) {
   const [showAdvanced, setShowAdvanced] = useState(false);
 
   const headerLabel = SECTION_LIBRARY[section.type]?.label || (section.type ? section.type : `Section ${index + 1}`);
@@ -986,28 +990,36 @@ function SectionEditor({ section, index, total, onChange, onMove, onRemove, stor
   };
 
   const advancedValue = useMemo(() => JSON.stringify(section, null, 2), [section]);
+  const collapsibleId = section.id ? `admin-homepage-section-${section.id}` : `admin-homepage-section-${section.type}-${index}`;
+  const headerActions = (
+    <div className="d-flex flex-wrap align-items-center justify-content-end gap-2">
+      <span className="badge text-bg-light text-secondary text-uppercase">{section.type || 'SECTION'}</span>
+      <div className="btn-group btn-group-sm" role="group">
+        <button type="button" className="btn btn-outline-secondary" onClick={() => onMove(-1)} disabled={index === 0} aria-label="Move section up">
+          <i className="bi bi-arrow-up"></i>
+        </button>
+        <button type="button" className="btn btn-outline-secondary" onClick={() => onMove(1)} disabled={index === total - 1} aria-label="Move section down">
+          <i className="bi bi-arrow-down"></i>
+        </button>
+        <button type="button" className="btn btn-outline-danger" onClick={onRemove} aria-label="Remove section">
+          <i className="bi bi-trash"></i>
+        </button>
+      </div>
+    </div>
+  );
 
   return (
-    <div className="border rounded p-3">
-      <div className="d-flex flex-wrap justify-content-between align-items-center gap-2 mb-2">
-        <div>
-          <strong>{headerLabel}</strong>
-          <div className="text-muted small">Type: {section.type}</div>
-        </div>
-        <div className="btn-group btn-group-sm" role="group">
-          <button type="button" className="btn btn-outline-secondary" onClick={() => onMove(-1)} disabled={index === 0} aria-label="Move section up">
-            <i className="bi bi-arrow-up"></i>
-          </button>
-          <button type="button" className="btn btn-outline-secondary" onClick={() => onMove(1)} disabled={index === total - 1} aria-label="Move section down">
-            <i className="bi bi-arrow-down"></i>
-          </button>
-          <button type="button" className="btn btn-outline-danger" onClick={onRemove} aria-label="Remove section">
-            <i className="bi bi-trash"></i>
-          </button>
-        </div>
-      </div>
-      {description && <p className="text-muted small mb-3">{description}</p>}
-
+    <AdminCollapsibleSection
+      id={collapsibleId}
+      title={headerLabel}
+      description={description}
+      defaultOpen={defaultOpen}
+      rememberState={rememberState}
+      persistKey={persistKey}
+      className="border rounded p-3 bg-body"
+      bodyClassName="mt-3"
+      actions={headerActions}
+    >
       {(errorIssues.length > 0 || warningIssues.length > 0) && (
         <div className="mb-3">
           {errorIssues.length > 0 && (
@@ -1089,7 +1101,7 @@ function SectionEditor({ section, index, total, onChange, onMove, onRemove, stor
           ></textarea>
         )}
       </div>
-    </div>
+    </AdminCollapsibleSection>
   );
 }
 

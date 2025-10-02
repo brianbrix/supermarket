@@ -127,30 +127,30 @@ class AdminNotificationService
         if ($product->stock === null) {
             return;
         }
-        $threshold = (int) ($this->settings->get('inventory.low_stock_threshold', 5));
-        if ($threshold <= 0) {
-            return;
+        $threshold = $product->low_stock_threshold;
+        if ($threshold === null) {
+            $threshold = (int) $this->settings->get('inventory.low_stock_threshold', 5);
         }
+        $threshold = (int) $threshold;
 
-        if ($product->stock > $threshold) {
-            return;
+        if ($threshold > 0 && $product->stock <= $threshold) {
+            $key = sprintf('inventory.low:%d', $product->id);
+
+            $this->notify([
+                'type' => 'inventory.low_stock',
+                'title' => 'Product nearing depletion',
+                'message' => sprintf('%s stock is down to %d units.', $product->name, $product->stock),
+                'severity' => $product->stock <= 0 ? 'danger' : 'warning',
+                'context_type' => 'product',
+                'context_id' => $product->id,
+                'data' => [
+                    'productId' => $product->id,
+                    'productName' => $product->name,
+                    'stock' => $product->stock,
+                    'lowStockThreshold' => $threshold,
+                ],
+            ], $key);
         }
-
-        $key = sprintf('inventory.low:%d', $product->id);
-
-        $this->notify([
-            'type' => 'inventory.low_stock',
-            'title' => 'Product nearing depletion',
-            'message' => sprintf('%s stock is down to %d units.', $product->name, $product->stock),
-            'severity' => $product->stock <= 0 ? 'danger' : 'warning',
-            'context_type' => 'product',
-            'context_id' => $product->id,
-            'data' => [
-                'productId' => $product->id,
-                'productName' => $product->name,
-                'stock' => $product->stock,
-            ],
-        ], $key);
 
         if ($product->stock <= 0) {
             $outKey = sprintf('inventory.out:%d', $product->id);
@@ -165,6 +165,7 @@ class AdminNotificationService
                     'productId' => $product->id,
                     'productName' => $product->name,
                     'stock' => $product->stock,
+                    'lowStockThreshold' => $threshold > 0 ? $threshold : null,
                 ],
             ], $outKey);
         }
@@ -257,8 +258,8 @@ class AdminNotificationService
 
         if (!empty($filters['search'])) {
             $query->where(function (Builder $builder) use ($filters) {
-                $builder->where('title', 'like', '%' . addcslashes($filters['search'], '%_') . '%')
-                    ->orWhere('message', 'like', '%' . addcslashes($filters['search'], '%_') . '%');
+                $builder->where('title', 'ilike', '%' . addcslashes($filters['search'], '%_') . '%')
+                    ->orWhere('message', 'ilike', '%' . addcslashes($filters['search'], '%_') . '%');
             });
         }
 

@@ -14,15 +14,26 @@ class Product extends Model
     use HasApiTokens, HasFactory;
 
     protected $fillable = [
-        'name','brand','brand_id','description','price','stock','unit','category_id','image_url','active'
+        'name',
+        'brand',
+        'brand_id',
+        'description',
+        'price',
+        'stock',
+        'low_stock_threshold',
+        'unit',
+        'category_id',
+        'image_url',
+        'active',
     ];
 
     protected $casts = [
         'created_at' => 'datetime',
         'updated_at' => 'datetime',
         'rating_avg' => 'float',
-        'rating_sum' => 'integer',
-        'rating_count' => 'integer',
+    'rating_sum' => 'integer',
+    'rating_count' => 'integer',
+    'low_stock_threshold' => 'integer',
         'rating_last_submitted_at' => 'datetime',
         'active' => 'boolean',
     ];
