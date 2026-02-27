@@ -44,7 +44,7 @@ docker compose -f docker-compose.production.yml pull || echo "⚠️  Some image
 
 # Build images
 echo "🔨 Building application images..."
-docker compose -f docker-compose.production.yml build --no-cache
+docker compose -f docker-compose.production.yml build
 
 # Stop existing containers
 echo "🛑 Stopping existing containers..."
