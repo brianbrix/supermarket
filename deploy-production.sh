@@ -40,19 +40,19 @@ echo "✅ Environment variables loaded"
 
 # Pull latest images
 echo "📦 Pulling Docker images..."
-docker-compose -f docker-compose.production.yml pull || echo "⚠️  Some images need to be built"
+docker compose -f docker-compose.production.yml pull || echo "⚠️  Some images need to be built"
 
 # Build images
 echo "🔨 Building application images..."
-docker-compose -f docker-compose.production.yml build --no-cache
+docker compose -f docker-compose.production.yml build --no-cache
 
 # Stop existing containers
 echo "🛑 Stopping existing containers..."
-docker-compose -f docker-compose.production.yml down
+docker compose -f docker-compose.production.yml down
 
 # Start services
 echo "🎬 Starting services..."
-docker-compose -f docker-compose.production.yml up -d
+docker compose -f docker-compose.production.yml up -d
 
 # Wait for database to be ready
 echo "⏳ Waiting for database to be ready..."
@@ -60,19 +60,19 @@ sleep 10
 
 # Run database migrations
 echo "🗃️  Running database migrations..."
-docker-compose -f docker-compose.production.yml exec -T supermarket_backend php artisan migrate --force
+docker compose -f docker-compose.production.yml exec -T supermarket_backend php artisan migrate --force
 
 # Clear and cache config
 echo "🧹 Optimizing application..."
-docker-compose -f docker-compose.production.yml exec -T supermarket_backend php artisan config:cache
-docker-compose -f docker-compose.production.yml exec -T supermarket_backend php artisan route:cache
-docker-compose -f docker-compose.production.yml exec -T supermarket_backend php artisan view:cache
+docker compose -f docker-compose.production.yml exec -T supermarket_backend php artisan config:cache
+docker compose -f docker-compose.production.yml exec -T supermarket_backend php artisan route:cache
+docker compose -f docker-compose.production.yml exec -T supermarket_backend php artisan view:cache
 
 echo ""
 echo "✅ Deployment complete!"
 echo ""
 echo "📊 Service Status:"
-docker-compose -f docker-compose.production.yml ps
+docker compose -f docker-compose.production.yml ps
 echo ""
 echo "🌐 Your supermarket application should be available at:"
 echo "   - https://shop.afyaquik.com"
@@ -80,7 +80,7 @@ echo ""
 echo "📝 Note: Your existing phpnuxbill deployment at hotspot.afyaquik.com remains unchanged"
 echo ""
 echo "📝 Useful commands:"
-echo "   - View logs: docker-compose -f docker-compose.production.yml logs -f"
-echo "   - Stop supermarket: docker-compose -f docker-compose.production.yml down"
-echo "   - Restart supermarket: docker-compose -f docker-compose.production.yml restart"
+echo "   - View logs: docker compose -f docker-compose.production.yml logs -f"
+echo "   - Stop supermarket: docker compose -f docker-compose.production.yml down"
+echo "   - Restart supermarket: docker compose -f docker-compose.production.yml restart"
 echo ""
